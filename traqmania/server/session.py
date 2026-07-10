@@ -81,6 +81,19 @@ def quantum_weights_path(track_name: str, n_qubits: int, suffix: str = "") -> Pa
     return WEIGHTS_DIR / f"quantum_{track_name}{suffix}{qtag}.npz"
 
 
+RANDOM_TRACK = "random"  # set_track name that triggers procedural generation
+
+
+def random_track_weights(n_qubits: int, suffix: str = "") -> tuple[Path, str]:
+    """(weights path, honest driver label) for a generated random track:
+    the trained ``quantum_universal*`` weights when bundled, else the gp
+    specialist (measured to lap all three bundled tracks zero-shot)."""
+    universal = quantum_weights_path("universal", n_qubits, suffix)
+    if universal.is_file():
+        return universal, "universal"
+    return quantum_weights_path("gp", n_qubits, suffix), "gp-trained generalist"
+
+
 @dataclass
 class _Car:
     """One simulated car in attract/race mode (human or agent-driven)."""
@@ -226,6 +239,8 @@ class DemoSession:
 
         self.mode = "attract"
         self.track_name = str(config["track"]["default"])
+        self.track_is_random = False
+        self._random_seed_rng = np.random.default_rng()  # seeds for seedless rerolls
         self.track = load_track(config, self.track_name)
         self._ghost: dict | None = load_ghost(self.track_name, self._ghosts_dir)
         self.cars: list[_Car] = []
@@ -309,7 +324,7 @@ class DemoSession:
         elif isinstance(msg, protocol.SetMode):
             self._set_mode(msg.mode)
         elif isinstance(msg, protocol.SetTrack):
-            self._set_track(msg.track)
+            self._set_track(msg.track, msg.seed)
         elif isinstance(msg, protocol.Train):
             self._handle_train(msg)
         elif isinstance(msg, protocol.Race):
@@ -324,6 +339,8 @@ class DemoSession:
     # -------------------------------------------------------- weight resolution
 
     def _quantum_weights_path(self, suffix: str = "") -> Path:
+        if self.track_is_random:  # no per-track specialist exists: fall back
+            return random_track_weights(self.n_qubits, suffix)[0]
         return quantum_weights_path(self.track_name, self.n_qubits, suffix)
 
     def _load_quantum_qfunc(self, path: Path) -> QuantumQFunction:
@@ -362,6 +379,9 @@ class DemoSession:
         """Why bundled weights block switching to ``mode`` (None when they don't).
 
         train mode needs none (a missing warm start falls back to a cold start)."""
+        if mode == "hardware" and self.track_is_random:
+            # the hardware runner loads tracks by bundled name (Track.load)
+            return "hardware execution needs a bundled track"
         if mode in ("attract", "hardware"):
             return self._agent_unavailable("quantum")
         if mode == "race":
@@ -407,19 +427,31 @@ class DemoSession:
         else:  # train: cars appear once a train{start} arrives
             self.cars = []
 
-    def _set_track(self, name: str) -> bool:
+    def _set_track(self, name: str, seed: int | None = None) -> bool:
         if self._training_alive():
             self._error("cannot change track while training is running")
             return False
         if self._hardware_alive():
             self._error("cannot change track while a hardware job is running")
             return False
-        if name not in available_tracks():
-            self._error(f"unknown track '{name}'")
-            return False
-        self.track = load_track(self.config, name)
-        self.track_name = name
-        self._ghost = load_ghost(name, self._ghosts_dir)
+        if self.track_is_random and name == self.track_name:
+            pass  # race/train restarts name the current generated track: keep it
+        elif name == RANDOM_TRACK:
+            track = self._generate_random_track(seed)
+            if track is None:
+                return False
+            self.track = track
+            self.track_name = track.name
+            self.track_is_random = True
+            self._ghost = None  # ghosts are never stored for random tracks
+        else:
+            if name not in available_tracks():
+                self._error(f"unknown track '{name}'")
+                return False
+            self.track = load_track(self.config, name)
+            self.track_name = name
+            self.track_is_random = False
+            self._ghost = load_ghost(name, self._ghosts_dir)
         self._outbox.append({"type": "track", "track": track_payload(self.track)})
         if self.mode == "attract":
             self._enter_attract()
@@ -431,6 +463,24 @@ class DemoSession:
         elif self.mode == "hardware":
             self._enter_hardware()
         return True
+
+    def _generate_random_track(self, seed: int | None):
+        """Fresh procedural track named ``random #<seed>`` (a seedless request
+        rolls one), or None with an error queued when generation fails."""
+        try:
+            from traqmania.env.trackgen import generate_track
+        except ImportError:
+            self._error("random tracks are not available in this build")
+            return None
+        if seed is None:
+            seed = int(self._random_seed_rng.integers(0, 1_000_000))
+        try:
+            return generate_track(seed,
+                                  resample_spacing=self.config["track"]["resample_spacing"],
+                                  name=f"random #{seed}")
+        except Exception as exc:
+            self._error(f"random track generation failed (seed {seed}): {exc}")
+            return None
 
     def _handle_qubits(self, msg: protocol.Qubits) -> None:
         """Live circuit-size switch: overlay the packaged q{n} profile (plain
@@ -448,8 +498,9 @@ class DemoSession:
             self._error(f"unknown qubit count {msg.n} (no packaged q{msg.n} profile)")
             return
         self._apply_config(config)
-        self.track = load_track(config, self.track_name)
-        self._ghost = load_ghost(self.track_name, self._ghosts_dir)
+        if not self.track_is_random:  # a generated track keeps its geometry
+            self.track = load_track(config, self.track_name)
+            self._ghost = load_ghost(self.track_name, self._ghosts_dir)
         self._agent_cache.clear()  # cached qfuncs were built for the old circuit
         self._last_quantum_emit.clear()
         self._abandon_hardware()
@@ -476,8 +527,11 @@ class DemoSession:
             else:
                 self._agent_cache[key] = load_agent(kind, self.track_name, config=self.config)
         x, y, theta = self.track.start_pose()
+        label = None
+        if self.track_is_random and kind == "quantum":  # honest fallback labeling
+            label = f"driver: {random_track_weights(self.n_qubits)[1]}"
         car = _Car(id=kind, kind=kind, state=np.array([x, y, theta, 0.0]),
-                   qfunc=self._agent_cache[key])
+                   qfunc=self._agent_cache[key], label=label)
         self._respawn(car)
         return car
 
@@ -961,6 +1015,8 @@ class DemoSession:
 
     def _maybe_record_ghost(self, car: _Car, lap_time: float) -> None:
         """Persist a clean lap as the track's best-lap ghost when it beats the record."""
+        if self.track_is_random:  # ephemeral tracks: never write ghosts_dir/random*.json
+            return
         if not car.traj_full or len(car.traj) < 2:
             return
         if self._ghost is not None and lap_time >= self._ghost["lap_time"]:

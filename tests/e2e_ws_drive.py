@@ -15,9 +15,11 @@ quantum car + quantum introspection messages), the live qubit switch
 training-stage cars), set_track, MLP training to completion, warm-started
 quantum training with lap telemetry (lap_times / best_lap_s / new_best_lap),
 a human-vs-quantum race with keyboard input, analog (gamepad-style) input and
-reset, hardware mode (fake-backend lap with replay ghost + SPSA sprint), and
-the best-lap ghost car in attract mode.  Skipped under plain ``pytest`` (it
-needs a running server and takes minutes); CI ignores it.
+reset, hardware mode (fake-backend lap with replay ghost + SPSA sprint),
+the best-lap ghost car in attract mode, and a seeded random track (generated
+payload, honest fallback driver, reproducibility, no ghost persistence).
+Skipped under plain ``pytest`` (it needs a running server and takes minutes);
+CI ignores it.
 """
 
 from __future__ import annotations
@@ -514,6 +516,37 @@ async def verify_attract_ghost(c: Client) -> None:
     print("  ok: ghost replay car streams in attract mode")
 
 
+async def verify_random_track(c: Client) -> None:
+    print("[ws] random track: seeded generation, attract drive, reproducibility")
+    seed = 4242
+    await c.send(type="set_track", track="random", seed=seed)
+    track = (await c.wait_for(lambda m: m["type"] == "track", timeout=30,
+                              desc="random track msg"))["track"]
+    check(track["name"] == f"random #{seed}", f"track payload named 'random #{seed}'")
+    check(len(track["centerline"]) > 10, "random track payload has centerline")
+    cars = await _attract_quantum_cars(c)
+    _check_drives(cars, n_rays=3, what="random track")
+    labels = {q.get("label") for q in cars}
+    check(labels == {"driver: gp-trained generalist"},
+          f"attract car carries the honest fallback-driver label ({labels})")
+    # the same seed reproduces the same track after switching away and back
+    await c.send(type="set_track", track="oval")
+    await c.wait_for(lambda m: m["type"] == "track" and m["track"]["name"] == "oval",
+                     timeout=30, desc="track msg (oval)")
+    await c.send(type="set_track", track="random", seed=seed)
+    again = (await c.wait_for(
+        lambda m: m["type"] == "track" and m["track"]["name"] == f"random #{seed}",
+        timeout=30, desc="reproduced random track"))["track"]
+    check(again["centerline"] == track["centerline"], "same seed reproduces the centerline")
+    check(not list(GHOSTS_DIR.glob("random*.json")),
+          "no ghost file was written for the random track")
+    await c.send(type="set_track", track="oval")
+    msg = await c.wait_for(lambda m: m["type"] == "track" and m["track"]["name"] == "oval",
+                           timeout=30, desc="track msg (oval restore)")
+    check(len(msg["track"]["centerline"]) > 10, "set_track oval restores the bundled track")
+    print("  ok: random track scenario complete")
+
+
 async def drive(port: int) -> None:
     from websockets.asyncio.client import connect
 
@@ -534,6 +567,7 @@ async def drive(port: int) -> None:
         await verify_hardware_lap(c)
         await verify_hardware_sprint(c)
         await verify_attract_ghost(c)
+        await verify_random_track(c)
         await c.send(type="set_mode", mode="attract")  # leave the kiosk in attract
     print("\nALL E2E CHECKS PASSED")
 

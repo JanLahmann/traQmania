@@ -90,7 +90,9 @@ export function send(type, payload = {}) {
  *  present the server uses these instead of the keys bitmask (send keys:0). */
 export const sendInput = (keys, analog) => send("input", analog ? { keys, ...analog } : { keys });
 export const setMode = (mode) => send("set_mode", { mode });
-export const setTrack = (track) => send("set_track", { track });
+/** `seed` (optional, track "random" only) reproduces a specific generated track. */
+export const setTrack = (track, seed) =>
+  send("set_track", seed === undefined ? { track } : { track, seed });
 export const setQubits = (n) => send("qubits", { n });
 
 export function trainCmd(action, agent, opts = {}) {

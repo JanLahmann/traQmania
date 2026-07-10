@@ -108,7 +108,14 @@ function applyTrack(payload) {
   state.bestLaps.clear();
   renderer.setTrack(payload);
   const sel = $("#track-select");
-  if (sel.value !== payload.name) sel.value = payload.name;
+  // Generated tracks are named "random #<seed>"; they map onto the picker's
+  // "random" entry, whose label shows the seed so the track is reproducible.
+  const isRandom = payload.name.startsWith("random #");
+  const randomOpt = sel.querySelector('option[value="random"]');
+  if (randomOpt) randomOpt.textContent = isRandom ? `🎲 ${payload.name}` : "🎲 random";
+  const value = isRandom ? "random" : payload.name;
+  if (sel.value !== value) sel.value = value;
+  $("#track-reroll").hidden = !isRandom;
 }
 
 // Circuit-size copy (q6/q8/q10 profiles or a live qubit switch): fix up the
@@ -240,6 +247,9 @@ net.on("_close", () => setStatus("reconnecting…", "pill-off"));
 net.on("welcome", (msg) => {
   state.tracks = msg.tracks || [];
   const sel = $("#track-select");
+  const randomOpt = document.createElement("option");
+  randomOpt.value = "random";
+  randomOpt.textContent = "🎲 random";
   sel.replaceChildren(
     ...state.tracks.map((name) => {
       const opt = document.createElement("option");
@@ -247,6 +257,7 @@ net.on("welcome", (msg) => {
       opt.textContent = name;
       return opt;
     }),
+    randomOpt,
   );
   if (msg.circuit_spec) {
     renderCircuit(msg.circuit_spec, $("#circuit-diagram"), $("#circuit-legend"));
@@ -347,7 +358,10 @@ for (const btn of document.querySelectorAll(".tab-btn")) {
   btn.addEventListener("click", () => selectTab(btn.dataset.tab));
 }
 
+// Picking "random" (and each reroll click) asks the server for a fresh
+// generated track; the answering track payload carries the seed in its name.
 $("#track-select").addEventListener("change", (ev) => net.setTrack(ev.target.value));
+$("#track-reroll").addEventListener("click", () => net.setTrack("random"));
 
 $("#qubit-select").addEventListener("change", (ev) => {
   net.setQubits(parseInt(ev.target.value, 10)); // server answers with a fresh welcome

@@ -35,11 +35,13 @@ def test_hardware_qvalues_match_fastsim(fake_backend):
 
     Tolerances are deliberately loose: the fake backend simulates a real
     device's noise model, which shrinks |<Z_a>| — we ask for argmax agreement
-    on most observations and absolute agreement within 0.5.
+    on most observations and absolute agreement within 0.5. The Aer shot
+    noise is seeded so the statistical margins cannot flake.
     """
     fast = QuantumQFunction(CIRCUIT_CFG, seed=7)
     hw = hardware.HardwareQFunction(CIRCUIT_CFG, fake_backend, shots=4096)
     hw.set_params(fast.get_params())
+    hw._estimator.options.simulator.seed_simulator = 1234  # pin the shot noise
 
     obs = np.random.default_rng(3).uniform(0.0, 1.0, size=(8, 4))
     q_fast = fast.q_values(obs)

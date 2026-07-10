@@ -126,6 +126,11 @@ input[type="number"] {
   color: var(--muted);
 }
 
+.reroll-btn {
+  margin-left: -12px; /* tuck against the track picker despite the topbar gap */
+  padding: 4px 8px;
+}
+
 #race-controls {
   display: flex;
   align-items: center;

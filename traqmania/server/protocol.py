@@ -60,7 +60,11 @@ class SetMode:
 
 @dataclass(frozen=True)
 class SetTrack:
+    """``seed`` is only meaningful with ``track == "random"``: it makes the
+    generated track reproducible (omitted -> the server rolls a fresh one)."""
+
     track: str
+    seed: int | None = None
     TYPE: ClassVar[str] = "set_track"
 
 
@@ -213,6 +217,7 @@ class Error:
 # like telemetry.loss and car.last_lap_time stay as explicit nulls).
 _OMIT_IF_NONE: dict[str, set[str]] = {
     Input.TYPE: {"steer", "throttle", "brake"},
+    SetTrack.TYPE: {"seed"},
     Welcome.TYPE: {"obs_labels"},
     Train.TYPE: {"track", "episodes"},
     Race.TYPE: {"track"},
@@ -342,8 +347,11 @@ def _parse_set_mode(d: dict) -> SetMode:
 
 
 def _parse_set_track(d: dict) -> SetTrack:
-    _check_extra(d, {"track"})
-    return SetTrack(track=_str(_req(d, "track"), "track"))
+    _check_extra(d, {"track", "seed"})
+    return SetTrack(
+        track=_str(_req(d, "track"), "track"),
+        seed=_int(d["seed"], "seed", 0) if d.get("seed") is not None else None,
+    )
 
 
 def _parse_train(d: dict) -> Train:

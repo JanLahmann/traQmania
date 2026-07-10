@@ -53,6 +53,8 @@ flowchart LR
 | `traqmania/env/track.py` | Closed-loop track geometry: resampling, arc-length projection, lidar raycasts, spatial-hash acceleration, validation. |
 | `traqmania/env/car.py` | Vectorized bicycle-ish car physics (throttle/brake/drag, speed-dependent steering). |
 | `traqmania/env/racing_env.py` | Gym-style vector env: obs = lidar rays (`[observation] ray_angles_deg`, 3 by default) + speed, progress reward, checkpoint/lap bonuses, off-track penalty, auto-reset. |
+| `traqmania/env/trackgen.py` | Procedural track generator (numpy-only): `generate_track(seed, difficulty)` builds a deterministic closed loop that passes the exact `Track.load` validation (see "Random tracks" below). |
+| `traqmania/env/multi_track.py` | `MultiTrackEnv`: round-robin mixture of per-track `RacingEnv`s behind the identical vector-env interface, so `DQNTrainer` trains one policy over several tracks unchanged; `random_pool` builds the mixture from generated tracks. |
 | `traqmania/agents/base.py` | `QFunction` protocol + the 4 discrete actions (right/straight/left at full throttle, coast-brake — car steer +1 turns left on screen). |
 | `traqmania/agents/quantum/circuit.py` | Canonical Qiskit circuit (single source of truth) + JSON `circuit_spec` for the browser diagram. |
 | `traqmania/agents/quantum/fastsim.py`, `adjoint.py` | Hand-written numpy statevector simulator and adjoint (backprop-style) gradients. |
@@ -67,7 +69,7 @@ flowchart LR
 | `traqmania/server/runtime.py` | Loading bundled agents/weights/tracks/ghosts, track payloads, training-config resolution. |
 | `traqmania/server/ws.py` | Connection `Hub`, broadcast fan-out, per-socket receive loop. |
 | `traqmania/server/app.py` | FastAPI factory: `/health`, `/ws`, static frontend mounted last. |
-| `traqmania/train_headless.py` | Offline training CLI that produces the bundled `weights/*.npz` (+ `.meta.json`, history JSON). |
+| `traqmania/train_headless.py` | Offline training CLI that produces the bundled `weights/*.npz` (+ `.meta.json`, history JSON). Besides the bundled names, `--track multi` trains one policy on the oval+chicane+gp mixture and `--track random` on a `MultiTrackEnv.random_pool` of generated tracks (seeded from `--seed`); weights save under the literal names (`quantum_multi.npz` / `quantum_random.npz`) — the universal-driver candidates. |
 | `traqmania/bench.py` | Micro-benchmarks (env steps, forward passes, DQN updates). |
 | `tools/make_stages.py` | Trains a fresh quantum agent, snapshots parameters as it learns, and saves 4 evolution-stage weights `quantum_<track>_stage{1..4}.npz` (+ `.meta.json` with the episode count shown as the car label). |
 | `traqmania/web/` | Frontend ES modules (`main`, `net`, `race`, `input`, `charts`, `circuit`, `quantum-panel`, `hardware-panel`, `attract`, `explain`); no build step, served statically. |
@@ -96,6 +98,43 @@ Weight filenames follow one rule (`server/session.quantum_weights_path`):
 `quantum_<track>[_warmstart|_stage<i>][_q<n>].npz` — the `_q<n>` tag is
 appended at any non-default qubit count, so a `--profile q6` run reads and
 writes `quantum_<track>_q6.npz` and never clobbers the 4-qubit weights.
+
+## Random tracks (🎲)
+
+`env/trackgen.generate_track(seed, difficulty=0.5)` builds a procedural
+closed-loop track, deterministic per `(seed, difficulty)`: random polar
+harmonics around a loop, amplitude-normalized so the minimum corner radius
+lands ~3× the car's kinematic minimum turn radius at difficulty 0, tightening
+toward ~1.6× (and narrowing from wide to gp-like width) at difficulty 1. The
+candidate is constructed through the same code path `Track.load` uses after
+parsing JSON (resample + validation + precompute), so a generated track can
+never be unlearnable by the load-time rules; a failing candidate retries with
+rng-derived jitter (≤ 50 attempts — in practice the first attempt passes).
+
+**Server flow** — `set_track {track: "random", seed?}` generates a track
+named `random #<seed>` (a seedless request rolls a fresh seed) and broadcasts
+the normal `track` payload; the UI's 🎲 picker entry sends exactly that, shows
+the seed in the picker label so the track is reproducible, and offers a
+reroll button. Attract / human race / live training all work as on any track.
+Differences from bundled tracks:
+
+- **Weights fallback chain** — no per-track specialist exists, so the quantum
+  driver resolves to `quantum_universal[_q<n>].npz` when bundled, else the gp
+  specialist `quantum_gp[_q<n>].npz` (measured to lap all three bundled
+  tracks zero-shot). The car is labelled honestly: `driver: universal` or
+  `driver: gp-trained generalist` (`session.random_track_weights`). Warm
+  starts and evolution stages follow the same chain (`_warmstart` /
+  `_stage<i>` suffixes).
+- **No ghost persistence** — best-lap ghosts are never written for random
+  tracks (`ghosts_dir` only ever holds bundled-track files).
+- **Graceful rejections** — hardware mode needs a bundled track name (the
+  runner loads tracks by name); evolution/mlp modes reject with the existing
+  missing-weights `error` when their files are absent.
+
+The universal-driver *candidates* are trained offline with
+`train_headless --track multi` (bundled-track mixture) or `--track random`
+(generated pool via `MultiTrackEnv.random_pool`); promoting one to
+`quantum_universal.npz` is a manual bundling decision.
 
 ## WebSocket protocol reference
 
@@ -129,8 +168,12 @@ alongside). The analog override persists until a later keys-only `input`.
 **`set_mode`** — `{mode}` with `mode` ∈ `attract | train | race | evolution |
 hardware`.
 
-**`set_track`** — `{track}` (a name from `welcome.tracks`). Rejected with an
-`error` while training is running or for unknown names.
+**`set_track`** — `{track, seed?}` with `track` a name from `welcome.tracks`
+or the special name `"random"` (procedurally generated — see "Random
+tracks"). `seed` (int ≥ 0, *omitted-if-null*) is only meaningful with
+`track: "random"` and makes the generated track reproducible; without it the
+server rolls a fresh one. Rejected with an `error` while training or a
+hardware job is running, or for unknown names.
 
 **`train`**
 
@@ -203,7 +246,7 @@ from the track JSON), `start: {x, y, theta}`, and polylines `centerline`,
 | `last_lap_time` | float \| null | null until the first lap |
 | `off_track` | bool | |
 | `rays` | [float] | *omitted-if-null*; normalized lidar distances (agent cars) |
-| `label` | str | *omitted-if-null*; e.g. `"ep 250"` (evolution), `"best 14.4s"` (ghost), `"hardware lap"` |
+| `label` | str | *omitted-if-null*; e.g. `"ep 250"` (evolution), `"best 14.4s"` (ghost), `"hardware lap"`, `"driver: gp-trained generalist"` (random track) |
 | `ghost` | bool | *omitted-if-null*; true for replay cars |
 
 **`quantum`** — live circuit introspection for a quantum car, throttled to

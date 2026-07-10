@@ -23,11 +23,13 @@ from traqmania.agents.base import N_ACTIONS
 from traqmania.agents.classical import MLPQFunction
 from traqmania.agents.training import DQNTrainer
 from traqmania.config import load_config
+from traqmania.env.multi_track import MultiTrackEnv
 from traqmania.env.racing_env import RacingEnv
 from traqmania.env.track import Track
 
 WEIGHTS_DIR = Path(__file__).resolve().parent / "weights"
 REPORT_EVERY = 20  # episodes per mean-return line
+MULTI_TRACK_NAMES = ("oval", "chicane", "gp")  # the --track multi mixture
 
 
 class CleanLapMonitor:
@@ -40,7 +42,7 @@ class CleanLapMonitor:
     seconds since ``reset()``.
     """
 
-    def __init__(self, env: RacingEnv) -> None:
+    def __init__(self, env: RacingEnv | MultiTrackEnv) -> None:
         self.env = env
         self.episodes_done = 0
         self.first_clean_episode: int | None = None
@@ -124,20 +126,39 @@ def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
     seed = int(training_cfg["seed"])
     episodes = int(episodes) if episodes is not None else int(training_cfg["episodes"])
 
-    track = Track.load(track_name, config["track"]["resample_spacing"])
-    env = RacingEnv(track, config, n_envs=training_cfg["n_parallel_envs"], seed=seed)
+    spacing = config["track"]["resample_spacing"]
+    n_parallel = training_cfg["n_parallel_envs"]
+    if track_name in ("multi", "random"):
+        # Mixture training: one policy over several tracks (the universal
+        # candidates); weights are saved under the literal name multi/random.
+        if track_name == "multi":
+            tracks = [Track.load(name, spacing) for name in MULTI_TRACK_NAMES]
+            env = MultiTrackEnv(tracks, config, n_envs=n_parallel, seed=seed)
+        else:
+            env = MultiTrackEnv.random_pool(config, n_envs=n_parallel, seed=seed)
+            tracks = env.tracks
+        save_name = track_name
+
+        def env_factory(tracks=tracks, config=config, seed=seed) -> MultiTrackEnv:
+            return MultiTrackEnv(tracks, config, n_envs=4, seed=seed + 10_000)
+    else:
+        track = Track.load(track_name, spacing)
+        env = RacingEnv(track, config, n_envs=n_parallel, seed=seed)
+        save_name = track.name
+
+        def env_factory(track=track, config=config, seed=seed) -> RacingEnv:
+            return RacingEnv(track, config, n_envs=4, seed=seed + 10_000)
+
     monitor = CleanLapMonitor(env)
     qfunc = build_qfunc(agent, env.n_features, seed, config)
     if init is not None:
         qfunc.set_params(np.load(init)["params"])
         print(f"warm-started from {init}")
-    def env_factory(track=track, config=config, seed=seed) -> RacingEnv:
-        return RacingEnv(track, config, n_envs=4, seed=seed + 10_000)
 
     trainer = DQNTrainer(qfunc, monitor, training_cfg, rng=np.random.default_rng(seed),
                          env_factory=env_factory)
 
-    print(f"training agent={agent} track={track.name} episodes={episodes} seed={seed}")
+    print(f"training agent={agent} track={save_name} episodes={episodes} seed={seed}")
     t0 = time.perf_counter()
     returns: list[float] = []
 
@@ -166,7 +187,7 @@ def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
         print(f"saved snapshot: episode {be['episode']} "
               f"(greedy eval: {be['laps']} laps, best {lap})")
 
-    npz_path = save_weights(qfunc, agent, track.name, config, episodes,
+    npz_path = save_weights(qfunc, agent, save_name, config, episodes,
                             out_dir=Path(out_dir) if out_dir else None)
     print(f"weights saved to {npz_path}")
     if not np.isnan(monitor.best_lap_s):
@@ -180,7 +201,7 @@ def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
         "best_lap_s": None if np.isnan(monitor.best_lap_s) else float(monitor.best_lap_s),
     }
     if history_path:
-        payload = dict(summary, agent=agent, track=track.name, seed=seed, episodes=episodes)
+        payload = dict(summary, agent=agent, track=save_name, seed=seed, episodes=episodes)
         Path(history_path).write_text(json.dumps(payload) + "\n", encoding="utf-8")
     return summary
 
@@ -189,7 +210,9 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="traQmania headless training")
     parser.add_argument("--agent", default="mlp", choices=["mlp", "quantum"],
                         help="Q-function backend")
-    parser.add_argument("--track", default="oval", help="track name (oval | chicane | gp)")
+    parser.add_argument("--track", default="oval",
+                        help="track name (oval | chicane | gp), 'multi' (oval+chicane+gp "
+                             "mixture) or 'random' (pool of generated tracks from --seed)")
     parser.add_argument("--episodes", type=int, default=None,
                         help="sub-env episodes (default: [training].episodes)")
     parser.add_argument("--seed", type=int, default=None,
