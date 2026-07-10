@@ -23,6 +23,16 @@
       <select id="track-select" aria-label="Track"></select>
     </label>
 
+    <label class="qubit-picker">
+      <span>Qubits</span>
+      <select id="qubit-select" aria-label="Qubits">
+        <option value="4">4</option>
+        <option value="6">6</option>
+        <option value="8">8</option>
+        <option value="10">10</option>
+      </select>
+    </label>
+
     <div id="race-controls" hidden>
       <label>
         <span>vs</span>
@@ -60,6 +70,7 @@
       <div class="panel active" id="panel-quantum">
         <h2>Live qubit readout</h2>
         <p class="hint" id="qubit-hint">Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the 4 qubits — one per action.</p>
+        <div id="obs-labels" class="hint"></div>
         <div id="qgauges"></div>
         <h2>Q-values</h2>
         <div id="qbars"></div>

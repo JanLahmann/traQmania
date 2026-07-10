@@ -31,6 +31,7 @@ from traqmania.agents.classical import MLPQFunction
 from traqmania.agents.quantum.circuit import circuit_spec
 from traqmania.agents.quantum.qdqn import QuantumQFunction
 from traqmania.agents.training import DQNTrainer
+from traqmania.config import load_config
 from traqmania.env.car import CarPhysics
 from traqmania.env.racing_env import RacingEnv
 from traqmania.server import protocol
@@ -210,22 +211,8 @@ class DemoSession:
     """Single shared demo session (one kiosk): mode state machine + tick loop."""
 
     def __init__(self, config: dict, ghosts_dir: Path | None = None):
-        self.config = config
         self._ghosts_dir = ghosts_dir  # None -> bundled traqmania/data/ghosts
-        physics = config["physics"]
-        self.dt = float(physics["dt"])
-        self.substeps_per_decision = int(physics["substeps_per_decision"])
-        self.car_physics = CarPhysics(physics)
-
-        obs_cfg = config["observation"]
-        self.ray_angles = np.deg2rad(np.asarray(obs_cfg["ray_angles_deg"], dtype=np.float64))
-        self.ray_max_dist = float(obs_cfg["ray_max_dist"])
-        self.n_qubits = int(config.get("circuit", {}).get("n_qubits", 4))
-
-        server_cfg = config["server"]
-        hz = 1.0 / self.dt
-        self.broadcast_every = max(1, round(hz / float(server_cfg["broadcast_hz"])))
-        self.telemetry_every = max(1, round(hz / float(server_cfg["telemetry_hz"])))
+        self._apply_config(config)
 
         self.t = 0.0
         self._substep = 0
@@ -245,6 +232,25 @@ class DemoSession:
         self.jobs: dict[str, TrainingJob] = {}
         self._enter_attract()
 
+    def _apply_config(self, config: dict) -> None:
+        """Set every config-derived attribute (shared by ``__init__`` and the
+        live qubit switch, which swaps ``config`` wholesale)."""
+        self.config = config
+        physics = config["physics"]
+        self.dt = float(physics["dt"])
+        self.substeps_per_decision = int(physics["substeps_per_decision"])
+        self.car_physics = CarPhysics(physics)
+
+        obs_cfg = config["observation"]
+        self.ray_angles = np.deg2rad(np.asarray(obs_cfg["ray_angles_deg"], dtype=np.float64))
+        self.ray_max_dist = float(obs_cfg["ray_max_dist"])
+        self.n_qubits = int(config.get("circuit", {}).get("n_qubits", 4))
+
+        server_cfg = config["server"]
+        hz = 1.0 / self.dt
+        self.broadcast_every = max(1, round(hz / float(server_cfg["broadcast_hz"])))
+        self.telemetry_every = max(1, round(hz / float(server_cfg["telemetry_hz"])))
+
     # -------------------------------------------------------------- messaging
 
     def welcome_payload(self) -> dict:
@@ -255,7 +261,19 @@ class DemoSession:
             "tracks": available_tracks(),
             "circuit_spec": circuit_spec(self.config),
             "ui": dict(self.config["ui"]),
+            "obs_labels": self._obs_labels(),
         }
+
+    def _obs_labels(self) -> list[str]:
+        """Display names of the observation features feeding the circuit,
+        from ``env.feature_names`` when the env provides it (older envs get
+        the default rays-then-speed labels)."""
+        env = RacingEnv(self.track, self.config, n_envs=1, seed=0)
+        names = getattr(env, "feature_names", None)
+        if names is None:
+            angles = self.config["observation"]["ray_angles_deg"]
+            names = [f"ray {a:+.0f}°" if a else "ray 0°" for a in angles] + ["speed"]
+        return [str(name) for name in names]
 
     def drain_outbox(self) -> list[dict]:
         out = self._outbox
@@ -296,6 +314,8 @@ class DemoSession:
             self._handle_train(msg)
         elif isinstance(msg, protocol.Race):
             self._handle_race(msg)
+        elif isinstance(msg, protocol.Qubits):
+            self._handle_qubits(msg)
         elif isinstance(msg, protocol.HardwareMsg):
             self._handle_hardware(msg)
         else:
@@ -411,6 +431,31 @@ class DemoSession:
         elif self.mode == "hardware":
             self._enter_hardware()
         return True
+
+    def _handle_qubits(self, msg: protocol.Qubits) -> None:
+        """Live circuit-size switch: overlay the packaged q{n} profile (plain
+        default config at n=4), rebuild track/agents/spec state in place, reset
+        to attract mode, and re-broadcast the welcome payload."""
+        if self._training_alive():
+            self._error("cannot change qubit count while training is running")
+            return
+        if self._hardware_alive():
+            self._error("cannot change qubit count while a hardware job is running")
+            return
+        try:
+            config = load_config() if msg.n == 4 else load_config(f"q{msg.n}")
+        except FileNotFoundError:
+            self._error(f"unknown qubit count {msg.n} (no packaged q{msg.n} profile)")
+            return
+        self._apply_config(config)
+        self.track = load_track(config, self.track_name)
+        self._ghost = load_ghost(self.track_name, self._ghosts_dir)
+        self._agent_cache.clear()  # cached qfuncs were built for the old circuit
+        self._last_quantum_emit.clear()
+        self._abandon_hardware()
+        self.mode = "attract"
+        self._enter_attract()  # graceful car-less fallback when q{n} is untrained
+        self._outbox.append(self.welcome_payload())
 
     def _enter_attract(self) -> None:
         car = self._try_make_agent_car("quantum")

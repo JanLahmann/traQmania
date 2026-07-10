@@ -150,6 +150,15 @@ hardware`.
 | `opponent` | `"quantum"` \| `"mlp"` | yes | |
 | `track` | str | no | switch track first |
 
+**`qubits`** — `{n}` (int ≥ 1): live circuit-size switch. The server overlays
+the packaged `q{n}` profile (`n = 4` → the plain default config), rebuilds
+track/env/agents/circuit state in place, resets to attract mode (car-less if
+that qubit count has no bundled weights for the current track — an `error` is
+emitted alongside, same as any weight-missing rejection), and re-broadcasts
+the `welcome` payload so every client re-renders. Rejected with an `error`
+while training or a hardware job is running, or when no packaged `q{n}`
+profile exists.
+
 **`hardware`** — run the quantum policy on an IBM backend (or a local fake
 noise-model twin).
 
@@ -163,12 +172,15 @@ noise-model twin).
 
 ### Server → client
 
-**`welcome`** — sent on connect and in reply to `hello`:
-`{mode, track: TrackPayload, tracks: [str], circuit_spec, ui}`.
+**`welcome`** — sent on connect and in reply to `hello` (and re-broadcast to
+everyone after a `qubits` switch):
+`{mode, track: TrackPayload, tracks: [str], circuit_spec, ui, obs_labels}`.
 `circuit_spec` is the JSON gate-by-gate circuit description from
 `agents/quantum/circuit.circuit_spec` (qubit/layer/gate list, parameter
 counts, readout observables). `ui` is the `[ui]` config section
-(`attract_idle_seconds`, `kiosk`).
+(`attract_idle_seconds`, `kiosk`). `obs_labels` (*omitted-if-null*) is the
+display name of each observation feature feeding the circuit, in qubit order
+(`env.feature_names`, e.g. `["ray -60°", "ray 0°", "ray +60°", "speed"]`).
 
 **`track`** — `{track: TrackPayload}` after a successful track switch.
 

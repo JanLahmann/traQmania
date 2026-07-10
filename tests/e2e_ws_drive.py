@@ -10,7 +10,8 @@ or let the script manage its own server process::
     .venv/bin/python tests/e2e_ws_drive.py --spawn
 
 Exercises the full pinned protocol: welcome payload, attract mode (moving
-quantum car + quantum introspection messages), evolution mode (labelled
+quantum car + quantum introspection messages), the live qubit switch
+(4 -> 6 drives, 8 degrades car-less, back to 4), evolution mode (labelled
 training-stage cars), set_track, MLP training to completion, warm-started
 quantum training with lap telemetry (lap_times / best_lap_s / new_best_lap),
 a human-vs-quantum race with keyboard input, analog (gamepad-style) input and
@@ -55,21 +56,22 @@ class Client:
     async def send(self, **msg) -> None:
         await self.ws.send(json.dumps(msg))
 
-    async def recv(self, timeout: float = 10.0) -> dict:
+    async def recv(self, timeout: float = 10.0, allow_errors: bool = False) -> dict:
         raw = await asyncio.wait_for(self.ws.recv(), timeout)
         msg = json.loads(raw)
-        if msg.get("type") == "error":
+        if msg.get("type") == "error" and not allow_errors:
             raise AssertionError(f"server error: {msg.get('message')}")
         self.log.append(msg)
         return msg
 
-    async def wait_for(self, predicate, timeout: float = 30.0, desc: str = "message") -> dict:
+    async def wait_for(self, predicate, timeout: float = 30.0, desc: str = "message",
+                       allow_errors: bool = False) -> dict:
         deadline = time.monotonic() + timeout
         while True:
             remaining = deadline - time.monotonic()
             if remaining <= 0:
                 raise AssertionError(f"timed out after {timeout}s waiting for {desc}")
-            msg = await self.recv(timeout=remaining)
+            msg = await self.recv(timeout=remaining, allow_errors=allow_errors)
             if predicate(msg):
                 return msg
 
@@ -161,6 +163,73 @@ async def verify_attract(c: Client) -> None:
         assert all(-1.0 <= e <= 1.0 for e in q["expectations"]), q["expectations"]
         assert len(q["q_values"]) == 4 and 0 <= q["action"] < 4
     print(f"  ok: all {len(quantum)} quantum msgs have 4 expectations in [-1, 1]")
+
+
+async def _attract_quantum_cars(c: Client, duration: float = 3.0) -> list[dict]:
+    """Live (non-ghost) quantum cars from ``duration`` seconds of attract states."""
+    states = [m for m in await c.collect(duration)
+              if m["type"] == "state" and m["mode"] == "attract"]
+    check(len(states) >= BROADCAST_HZ * 0.5 * duration,
+          f"attract states streaming ({len(states)} in {duration}s)")
+    return [q for q in (car_by_kind(s, "quantum") for s in states) if q is not None]
+
+
+def _check_drives(cars: list[dict], n_rays: int, what: str) -> None:
+    check(bool(cars), f"{what}: quantum car present in attract states")
+    spread = (max(q["x"] for q in cars) - min(q["x"] for q in cars)) \
+        + (max(q["y"] for q in cars) - min(q["y"] for q in cars))
+    check(spread > 1.0, f"{what}: quantum car drives (x+y spread {spread:.2f})")
+    rays = next(q["rays"] for q in reversed(cars) if q.get("rays") is not None)
+    check(len(rays) == n_rays, f"{what}: state rays carry {n_rays} entries ({len(rays)})")
+
+
+async def verify_qubit_switch(c: Client) -> None:
+    print("[ws] live qubit switch: 4 -> 6 (drives) -> 8 (untrained, degraded) -> 4")
+    await c.send(type="qubits", n=6)
+    welcome = await c.wait_for(lambda m: m["type"] == "welcome",
+                               timeout=60, desc="welcome after qubits=6")
+    spec = welcome["circuit_spec"]
+    check(spec["n_qubits"] == 6, "q6 welcome.circuit_spec.n_qubits == 6")
+    check(spec["n_params"]["total"] == 80,
+          f"q6 circuit has 80 params ({spec['n_params']['total']})")
+    labels = welcome.get("obs_labels")
+    check(isinstance(labels, list) and len(labels) == 6 and labels[-1] == "speed",
+          f"q6 welcome.obs_labels lists 6 features ending in speed ({labels})")
+    check(welcome["mode"] == "attract", "qubit switch resets to attract mode")
+    _check_drives(await _attract_quantum_cars(c), n_rays=5, what="q6")
+
+    # 8 qubits has no bundled oval weights: switch succeeds but degrades to a
+    # car-less attract mode, with the existing weight-missing error alongside.
+    await c.send(type="qubits", n=8)
+    errors: list[dict] = []
+
+    def until_welcome(m: dict) -> bool:
+        if m["type"] == "error":
+            errors.append(m)
+        return m["type"] == "welcome"
+
+    welcome = await c.wait_for(until_welcome, timeout=60, allow_errors=True,
+                               desc="welcome after qubits=8")
+    check(welcome["circuit_spec"]["n_qubits"] == 8, "q8 welcome.circuit_spec.n_qubits == 8")
+    check(len(welcome.get("obs_labels") or []) == 8, "q8 welcome.obs_labels lists 8 features")
+    check(any("_q8.npz" in e.get("message", "") for e in errors),
+          f"missing q8 weights reported via the existing error path ({len(errors)} error(s))")
+    states = [m for m in await c.collect(1.5) if m["type"] == "state"]
+    check(len(states) >= 5, f"degraded q8 attract keeps broadcasting ({len(states)} states)")
+    check(all(car_by_kind(s, "quantum") is None for s in states),
+          "no live quantum car at the untrained qubit count")
+
+    await c.send(type="qubits", n=4)
+    welcome = await c.wait_for(lambda m: m["type"] == "welcome",
+                               timeout=60, desc="welcome after qubits=4")
+    spec = welcome["circuit_spec"]
+    check(spec["n_qubits"] == 4, "back to 4: welcome.circuit_spec.n_qubits == 4")
+    check(spec["n_params"]["total"] == 56,
+          f"back to 4: circuit has 56 params ({spec['n_params']['total']})")
+    check(welcome.get("obs_labels") == ["ray -60°", "ray 0°", "ray +60°", "speed"],
+          f"back to 4: default obs_labels restored ({welcome.get('obs_labels')})")
+    _check_drives(await _attract_quantum_cars(c), n_rays=3, what="back to 4")
+    print("  ok: live qubit switch 4 -> 6 -> 8 -> 4 complete")
 
 
 async def verify_evolution(c: Client) -> None:
@@ -455,6 +524,7 @@ async def drive(port: int) -> None:
         c = Client(ws)
         await verify_welcome(c)
         await verify_attract(c)
+        await verify_qubit_switch(c)
         await verify_evolution(c)
         await verify_set_track(c, "chicane")
         await verify_train_mlp(c, episodes=10)

@@ -111,20 +111,31 @@ function applyTrack(payload) {
   if (sel.value !== payload.name) sel.value = payload.name;
 }
 
-// Non-default circuit sizes (q6/q8/q10 profiles): fix up the 4-qubit copy in
-// the captions, the readout hint and the Explain panel. At the default
-// 4 qubits everything stays exactly as authored.
+// Circuit-size copy (q6/q8/q10 profiles or a live qubit switch): fix up the
+// 4-qubit copy in the captions, the readout hint, the header dropdown and the
+// Explain panel. At the default 4 qubits the authored text is reproduced, so
+// switching back from a larger circuit restores it.
 function applyCircuitSize(spec) {
   attract.setCircuitSpec(spec);
-  const n = spec.n_qubits;
-  if (!n || n === 4) return;
+  const n = spec.n_qubits || 4;
+  const sel = $("#qubit-select");
+  if (sel && sel.value !== String(n)) sel.value = String(n);
   const hint = $("#qubit-hint");
   if (hint) {
     hint.innerHTML =
-      `Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the first 4 of ${n} qubits` +
-      " — one per action.";
+      n === 4
+        ? "Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the 4 qubits — one per action."
+        : `Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the first 4 of ${n} qubits` +
+          " — one per action.";
   }
   initExplain($("#panel-explain"), spec);
+}
+
+// Observation feature names (welcome.obs_labels): what each encoded input is.
+function applyObsLabels(labels) {
+  const el = $("#obs-labels");
+  if (!el) return;
+  el.textContent = Array.isArray(labels) && labels.length ? `Inputs: ${labels.join(" · ")}` : "";
 }
 
 // -- lap board ---------------------------------------------------------------
@@ -241,6 +252,7 @@ net.on("welcome", (msg) => {
     renderCircuit(msg.circuit_spec, $("#circuit-diagram"), $("#circuit-legend"));
     applyCircuitSize(msg.circuit_spec);
   }
+  applyObsLabels(msg.obs_labels);
   if (msg.ui) {
     attract.setIdleSeconds(msg.ui.attract_idle_seconds || 45);
     document.body.classList.toggle("kiosk", Boolean(msg.ui.kiosk));
@@ -336,6 +348,10 @@ for (const btn of document.querySelectorAll(".tab-btn")) {
 }
 
 $("#track-select").addEventListener("change", (ev) => net.setTrack(ev.target.value));
+
+$("#qubit-select").addEventListener("change", (ev) => {
+  net.setQubits(parseInt(ev.target.value, 10)); // server answers with a fresh welcome
+});
 
 $("#race-start").addEventListener("click", () => {
   net.raceCmd("start", $("#race-opponent").value, state.trackName || undefined);

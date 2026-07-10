@@ -118,6 +118,7 @@ input[type="number"] {
 }
 
 .track-picker,
+.qubit-picker,
 #race-controls label {
   display: flex;
   align-items: center;

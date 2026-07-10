@@ -16,6 +16,10 @@ const CAPTIONS = [
   "This runs a quantum simulator — the same circuit can run on real hardware.",
 ];
 
+// Authored copy of the captions setCircuitSpec() rewrites, so a live switch
+// back to the default 4 qubits restores the stock text.
+const STOCK_CAPTIONS = [...CAPTIONS];
+
 const ROTATE_MS = 6000;
 
 export class AttractManager {
@@ -40,10 +44,14 @@ export class AttractManager {
   }
 
   /** Rewrite the circuit-size captions from the welcome `circuit_spec`.
-   *  No-op at the default 4 qubits, so the stock copy stays untouched. */
+   *  At the default 4 qubits the stock copy is restored (a live qubit
+   *  switch may have rewritten it). */
   setCircuitSpec(spec) {
-    const n = spec && spec.n_qubits;
-    if (!n || n === 4) return;
+    const n = (spec && spec.n_qubits) || 4;
+    if (n === 4) {
+      for (const i of [0, 1, 3, 7]) CAPTIONS[i] = STOCK_CAPTIONS[i];
+      return;
+    }
     CAPTIONS[0] = `A ${n}-qubit quantum circuit is driving this car.`;
     const total = spec.n_params && spec.n_params.total;
     if (total) {

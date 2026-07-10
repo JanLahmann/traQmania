@@ -7,3 +7,8 @@ n_qubits = 10
 
 [observation]
 ray_angles_deg = [-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0]
+# Engineered-feature alternative: 5 rays + speed + all four track-aware
+# inputs (still 10 features).  Uncomment all the lines below to activate:
+# ray_angles_deg = [-60.0, -30.0, 0.0, 30.0, 60.0]
+# features = ["rays", "speed", "curvature_ahead", "lateral_offset",
+#             "heading_error", "corner_speed_ratio"]

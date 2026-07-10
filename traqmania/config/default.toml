@@ -14,6 +14,12 @@ k_steer = 2.6             # rad/s steering rate at peak authority
 [observation]
 ray_angles_deg = [-60.0, 0.0, 60.0]
 ray_max_dist = 30.0       # normalization length for lidar rays
+# Observation feature kinds, concatenated in order; every scalar lands in [0, 1]
+# and the total (rays = one per ray angle, the rest one each) must equal
+# [circuit] n_qubits.  Kinds: "rays", "speed", "curvature_ahead",
+# "lateral_offset", "heading_error", "corner_speed_ratio".
+features = ["rays", "speed"]
+lookahead_m = 15.0        # arc-length window for curvature_ahead / corner_speed_ratio
 
 [reward]
 progress_scale = 1.0      # reward per unit of centerline arc-length gained

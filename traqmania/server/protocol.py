@@ -83,6 +83,15 @@ class Race:
 
 
 @dataclass(frozen=True)
+class Qubits:
+    """Live circuit-size switch: rebuild the session on the packaged q{n}
+    profile (n=4 -> plain default config) and reset to attract mode."""
+
+    n: int
+    TYPE: ClassVar[str] = "qubits"
+
+
+@dataclass(frozen=True)
 class HardwareMsg:
     """Run the quantum policy on IBM hardware (or its local fake twin).
 
@@ -126,6 +135,7 @@ class Welcome:
     tracks: list
     circuit_spec: dict
     ui: dict
+    obs_labels: list | None = None  # display names of the observation features
     TYPE: ClassVar[str] = "welcome"
 
 
@@ -203,6 +213,7 @@ class Error:
 # like telemetry.loss and car.last_lap_time stay as explicit nulls).
 _OMIT_IF_NONE: dict[str, set[str]] = {
     Input.TYPE: {"steer", "throttle", "brake"},
+    Welcome.TYPE: {"obs_labels"},
     Train.TYPE: {"track", "episodes"},
     Race.TYPE: {"track"},
     HardwareMsg.TYPE: {"iterations", "shots", "max_decisions"},
@@ -355,6 +366,11 @@ def _parse_race(d: dict) -> Race:
     )
 
 
+def _parse_qubits(d: dict) -> Qubits:
+    _check_extra(d, {"n"})
+    return Qubits(n=_int(_req(d, "n"), "n", 1))
+
+
 def _parse_hardware(d: dict) -> HardwareMsg:
     _check_extra(d, {"action", "backend", "iterations", "shots", "max_decisions"})
     return HardwareMsg(
@@ -375,11 +391,14 @@ _CLIENT_PARSERS = {
     SetTrack.TYPE: _parse_set_track,
     Train.TYPE: _parse_train,
     Race.TYPE: _parse_race,
+    Qubits.TYPE: _parse_qubits,
     HardwareMsg.TYPE: _parse_hardware,
 }
 
 
-def parse_client(data: Any) -> Hello | Input | SetMode | SetTrack | Train | Race | HardwareMsg:
+def parse_client(
+    data: Any,
+) -> Hello | Input | SetMode | SetTrack | Train | Race | Qubits | HardwareMsg:
     """Strictly parse a client -> server dict; raises ProtocolError on anything off."""
     if not isinstance(data, dict):
         raise ProtocolError("message must be a JSON object")
@@ -424,6 +443,8 @@ def _parse_welcome(d: dict) -> Welcome:
         tracks=[_str(t, "tracks[]") for t in _req(d, "tracks")],
         circuit_spec=dict(_req(d, "circuit_spec")),
         ui=dict(_req(d, "ui")),
+        obs_labels=[_str(s, "obs_labels[]") for s in d["obs_labels"]]
+        if d.get("obs_labels") is not None else None,
     )
 
 

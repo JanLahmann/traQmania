@@ -88,7 +88,8 @@ class Track:
     ``centerline`` (N,2) resampled to ~uniform spacing, ``s`` (N,) cumulative
     arc length per point, ``total_length`` (float), ``checkpoints`` (list of
     fractions in [0,1)), ``tangents``/``normals`` (N,2) unit vectors (normal
-    points left of the direction of travel).
+    points left of the direction of travel), ``curvature`` (N,) unsigned
+    |kappa| per point and its maximum ``max_abs_curvature``.
     """
 
     def __init__(self, name: str, centerline, half_width: float, checkpoints,
@@ -192,6 +193,19 @@ class Track:
         self.tangents = diff / np.linalg.norm(diff, axis=1, keepdims=True)
         self.normals = np.stack([-self.tangents[:, 1], self.tangents[:, 0]], axis=1)
 
+        # Unsigned curvature |kappa| per centerline point: three-point
+        # circumradius formula (same as _validate_curvature), attributed to
+        # the middle point of each consecutive triple.
+        p1 = np.roll(cl, -1, axis=0)
+        p2 = np.roll(cl, -2, axis=0)
+        a = np.linalg.norm(p1 - cl, axis=1)
+        b = np.linalg.norm(p2 - p1, axis=1)
+        c = np.linalg.norm(p2 - cl, axis=1)
+        area2 = np.abs(_cross2(p1 - cl, p2 - cl))  # twice the triangle area
+        kappa = np.where(area2 > 1e-12, 2.0 * area2 / (a * b * c), 0.0)
+        self.curvature = np.roll(kappa, 1)
+        self.max_abs_curvature = float(self.curvature.max())
+
         # Centerline segments i -> (i+1) mod N.
         self._seg_a = cl
         self._seg_d = np.roll(cl, -1, axis=0) - cl
@@ -219,6 +233,28 @@ class Track:
         x, y = self.centerline[0]
         heading = math.atan2(self.tangents[0, 1], self.tangents[0, 0])
         return float(x), float(y), heading
+
+    def curvature_ahead(self, s_vals, lookahead: float) -> np.ndarray:
+        """(B,) arc lengths -> (B,) max |kappa| of the centerline over the
+        arc-length window [s, s + lookahead] ahead of each query (wraps around
+        the loop; sampled at the ~uniform resampled points)."""
+        s = np.atleast_1d(np.asarray(s_vals, dtype=np.float64))
+        n = len(self.centerline)
+        ds = self.total_length / n
+        first = np.floor(s / ds).astype(np.int64)
+        count = int(math.ceil(float(lookahead) / ds)) + 1
+        idx = (first[:, None] + np.arange(count)[None, :]) % n
+        return self.curvature[idx].max(axis=1)
+
+    def tangent_angle(self, s_vals) -> np.ndarray:
+        """(B,) arc lengths -> (B,) heading (radians, in (-pi, pi]) of the
+        centerline tangent at the nearest resampled point."""
+        s = np.atleast_1d(np.asarray(s_vals, dtype=np.float64))
+        n = len(self.centerline)
+        ds = self.total_length / n
+        idx = np.floor(s / ds + 0.5).astype(np.int64) % n
+        t = self.tangents[idx]
+        return np.arctan2(t[:, 1], t[:, 0])
 
     def _project_onto(self, p: np.ndarray, cand: np.ndarray):
         """Project points (B,2) onto candidate segments (B,K) (pad = -1).

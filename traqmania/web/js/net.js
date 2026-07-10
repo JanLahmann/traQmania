@@ -91,6 +91,7 @@ export function send(type, payload = {}) {
 export const sendInput = (keys, analog) => send("input", analog ? { keys, ...analog } : { keys });
 export const setMode = (mode) => send("set_mode", { mode });
 export const setTrack = (track) => send("set_track", { track });
+export const setQubits = (n) => send("qubits", { n });
 
 export function trainCmd(action, agent, opts = {}) {
   const msg = { action, agent };
