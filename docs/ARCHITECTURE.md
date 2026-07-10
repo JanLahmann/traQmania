@@ -49,19 +49,19 @@ flowchart LR
 | Module | Responsibility |
 |---|---|
 | `traqmania/__main__.py` | CLI entry point: profile/config/host/port flags, starts uvicorn. |
-| `traqmania/config.py` | `default.toml` + profile overlay (`pi4`, `pi5`, `exhibition`) + optional extra TOML; `./config/*.toml` in the working dir shadows packaged profiles. |
+| `traqmania/config.py` | `default.toml` + profile overlay (`pi4`, `pi5`, `exhibition`, plus the circuit-size overlays `q6`/`q8`/`q10` — each sets `[circuit] n_qubits` and the matching `[observation] ray_angles_deg`) + optional extra TOML; `./config/*.toml` in the working dir shadows packaged profiles. |
 | `traqmania/env/track.py` | Closed-loop track geometry: resampling, arc-length projection, lidar raycasts, spatial-hash acceleration, validation. |
 | `traqmania/env/car.py` | Vectorized bicycle-ish car physics (throttle/brake/drag, speed-dependent steering). |
-| `traqmania/env/racing_env.py` | Gym-style vector env: obs = 3 lidar rays + speed, progress reward, checkpoint/lap bonuses, off-track penalty, auto-reset. |
+| `traqmania/env/racing_env.py` | Gym-style vector env: obs = lidar rays (`[observation] ray_angles_deg`, 3 by default) + speed, progress reward, checkpoint/lap bonuses, off-track penalty, auto-reset. |
 | `traqmania/agents/base.py` | `QFunction` protocol + the 4 discrete actions (left/straight/right at full throttle, coast-brake). |
 | `traqmania/agents/quantum/circuit.py` | Canonical Qiskit circuit (single source of truth) + JSON `circuit_spec` for the browser diagram. |
 | `traqmania/agents/quantum/fastsim.py`, `adjoint.py` | Hand-written numpy statevector simulator and adjoint (backprop-style) gradients. |
-| `traqmania/agents/quantum/qdqn.py` | `QuantumQFunction`: fastsim-backed `QFunction`, flat 56-param layout `[lam, theta, w, b]`. |
+| `traqmania/agents/quantum/qdqn.py` | `QuantumQFunction`: fastsim-backed `QFunction`, flat `[lam, theta, w, b]` layout, P = 3·L·n + 8 params (56 at 4 qubits, 80 at 6). |
 | `traqmania/agents/quantum/qnn.py` | Same circuit via qiskit-machine-learning `EstimatorQNN` (parity checks, shots/noise backends). |
 | `traqmania/agents/classical/mlp.py` | 76-parameter numpy MLP baseline (4-8-4, tanh) with analytic backprop. |
 | `traqmania/agents/training/dqn.py` | Double-DQN loop over vectorized envs, Adam, replay buffer — shared by both backends. |
 | `traqmania/agents/training/spsa.py` | Minimal SPSA minimizer used by hardware sprints. |
-| `traqmania/hardware.py` | IBM/fake backends via `qiskit-ibm-runtime`: `HardwareQFunction` (inference-only, EstimatorV2), `run_hardware_lap`, `spsa_sprint`; also a CLI (`python -m traqmania.hardware lap|sprint`). |
+| `traqmania/hardware.py` | IBM/fake backends via `qiskit-ibm-runtime`: `HardwareQFunction` (inference-only, EstimatorV2), `run_hardware_lap`, `spsa_sprint`; also a CLI (`python -m traqmania.hardware lap|sprint`). Backend choice is qubit-aware (`min_qubits = max(5, n_qubits)` — at 6 qubits the 5-qubit fakes are skipped and the 7-qubit `fake_lagos` is picked), and the CLI takes `--profile` (e.g. `python -m traqmania.hardware lap --fake --profile q6`). |
 | `traqmania/server/protocol.py` | Typed WS messages; strict client-side validation (`ProtocolError`). |
 | `traqmania/server/session.py` | `DemoSession`: the mode state machine and synchronous 60 Hz `tick()`; training threads; ghost recording. |
 | `traqmania/server/runtime.py` | Loading bundled agents/weights/tracks/ghosts, track payloads, training-config resolution. |
@@ -71,6 +71,31 @@ flowchart LR
 | `traqmania/bench.py` | Micro-benchmarks (env steps, forward passes, DQN updates). |
 | `tools/make_stages.py` | Trains a fresh quantum agent, snapshots parameters as it learns, and saves 4 evolution-stage weights `quantum_<track>_stage{1..4}.npz` (+ `.meta.json` with the episode count shown as the car label). |
 | `traqmania/web/` | Frontend ES modules (`main`, `net`, `race`, `input`, `charts`, `circuit`, `quantum-panel`, `hardware-panel`, `attract`, `explain`); no build step, served statically. |
+
+## Qubit-count profiles (q6 / q8 / q10)
+
+The quantum stack is generalized over `[circuit] n_qubits`. Qubits map 1:1 to
+observation features — (n − 1) lidar rays evenly spaced over [−60°, +60°]
+plus normalized speed — while the **4 actions and the Z_0…Z_3 readout stay
+fixed** (extra qubits only widen the feature register). The overlays set
+exactly that pair of config values:
+
+- `--profile q6` — 6 qubits, 5 rays; trained oval weights are bundled
+  (`weights/quantum_oval_q6.npz`).
+- `--profile q8` / `q10` — 8/10 qubits, 7/9 rays; **untrained options**:
+  modes that need bundled weights stay unavailable until you train, e.g.
+  `python -m traqmania.train_headless --agent quantum --profile q8`.
+
+The default stays 4 qubits and is bit-identical to the pre-scaling stack
+(pinned by a regression test). The evolution stages and the bundled MLP
+(agent and race opponent) are 4-qubit-only: at n ≠ 4 the session rejects
+those modes/opponents with an `error` message instead of crashing (evolution
+comes back if you produce `_stage<i>` weights at that qubit count).
+
+Weight filenames follow one rule (`server/session.quantum_weights_path`):
+`quantum_<track>[_warmstart|_stage<i>][_q<n>].npz` — the `_q<n>` tag is
+appended at any non-default qubit count, so a `--profile q6` run reads and
+writes `quantum_<track>_q6.npz` and never clobbers the 4-qubit weights.
 
 ## WebSocket protocol reference
 
@@ -218,8 +243,9 @@ All timing derives from `[physics] dt = 1/60` and
   asyncio loop (`DemoSession.run`) drives it with drift correction (and
   resyncs rather than spiraling if it falls > 0.5 s behind). Tests call
   `tick()` directly; nothing in the session requires an event loop.
-- **10 Hz decisions** — every 6th substep each agent car observes (3 rays +
-  speed), takes `argmax Q`, and holds that action for the next 6 substeps —
+- **10 Hz decisions** — every 6th substep each agent car observes (its lidar
+  rays + speed), takes `argmax Q`, and holds that action for the next 6
+  substeps —
   exactly matching training. `quantum` introspection messages are throttled
   to ≤ 10 Hz per car.
 - **20 Hz broadcast** — `state` messages at `[server] broadcast_hz`
@@ -272,7 +298,9 @@ python -m traqmania.train_headless --agent mlp --track hairpin
 python tools/make_stages.py --track hairpin   # evolution-mode snapshots
 ```
 
-which writes `traqmania/weights/{quantum,mlp}_hairpin.npz` + `.meta.json`.
+which writes `traqmania/weights/{quantum,mlp}_hairpin.npz` + `.meta.json`
+(at a non-default qubit count, pass e.g. `--profile q6` and the quantum
+filenames gain the `_q6` tag — see the filename rule above).
 Slow-to-learn tracks can get a `[training_presets.hairpin]` section in
 `default.toml` (merged onto `[training]` by `runtime.resolve_training_cfg`).
 
@@ -283,8 +311,8 @@ numpy, parameters in one flat vector:
 
 ```python
 class MyQFunction:
-    n_features: int   # 4 = 3 lidar rays + speed
-    n_actions: int    # 4 = left / straight / right / brake
+    n_features: int   # lidar rays + speed (4 at the default config)
+    n_actions: int    # always 4 = left / straight / right / brake
 
     def q_values(self, obs):            # (B, F) -> (B, A)
     def grad_selected(self, obs, action_idx, upstream):  # -> (P,)

@@ -5,7 +5,8 @@ quantum circuit learn to race — then grab the keyboard and try to beat it.
 
 ![traQmania demo: attract mode, live quantum training, and race mode](docs/traqmania-hero.gif)
 
-- Quantum Deep Q-Learning (4 qubits, ~56 trainable parameters) built on
+- Quantum Deep Q-Learning (4 qubits / 56 trainable parameters by default; a
+  trained 6-qubit / 80-parameter variant ships behind `--profile q6`) built on
   [Qiskit](https://www.ibm.com/quantum/qiskit) and
   [qiskit-machine-learning](https://github.com/qiskit-community/qiskit-machine-learning),
   anchored in [Chen et al., *Variational Quantum Circuits for Deep Reinforcement
@@ -21,6 +22,7 @@ quantum circuit learn to race — then grab the keyboard and try to beat it.
 ```sh
 ./run.sh                    # venv + install + launch, opens http://127.0.0.1:8000
 ./run.sh --profile pi5      # Raspberry Pi 5 profile
+./run.sh --profile q6       # 6-qubit circuit: 5 lidar rays, 80 parameters
 ```
 
 Or with Docker (multi-arch, works on a Pi):
@@ -53,6 +55,15 @@ images with Qiskit preinstalled):
 
 Warm-start live demo: from the bundled pre-first-lap checkpoint, the quantum agent
 gets its first clean lap in **1.4–2.8 s** of training (oval, 3/3 seeds).
+
+**4 vs 6 qubits** (oval; `--profile q6` senses with 5 lidar rays instead of 3):
+80 vs 56 parameters (+43 %), first clean lap at episode 286/311/352 across seeds
+vs ≈ 300 — the same sample efficiency — and best lap 14.7 s vs 14.4 s. Honest
+takeaway: the extra qubits neither help nor hurt learning on this track; treat it
+as a real scaling data point, not a success story. (Wall-clock to a first lap is
+~28 s vs ~11 s, but that is per-episode compute, not learning speed: the 6-qubit
+statevector is 4× larger — 64 vs 16 amplitudes — and the 6-qubit runs also shared
+the machine three-at-once.)
 
 Why we train on a simulator and run inference on hardware: one double-DQN update is
 **~3.4 ms** with the numpy statevector + adjoint path vs **~20.5 s** with

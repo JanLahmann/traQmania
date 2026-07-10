@@ -66,6 +66,27 @@ of the same name — so a Pi kiosk is `./run.sh --profile pi5 --config
 traqmania/config/exhibition.toml`. Run the browser fullscreen, e.g.
 `chromium-browser --kiosk http://localhost:8000`.
 
+### The 6-qubit variant
+
+```sh
+./run.sh --profile q6
+```
+
+What visibly changes: the car senses with **5 lidar rays** instead of 3, the
+circuit diagram shows **6 qubits**, and the parameter count reads **80**
+(actions stay 4). Bundled 6-qubit weights exist for the **oval** only, so
+attract, race-vs-quantum, and hardware laps work there; **Evolution** and the
+**MLP opponent** are 4-qubit-only, and the UI reports a clear error if
+selected rather than crashing. Live training works on any track, but there is
+no 6-qubit warm-start checkpoint — training is cold (~28 s to a first clean
+lap on the oval). Hardware mode automatically picks a big-enough fake backend
+(the 7-qubit `fake_lagos` instead of the 5-qubit devices).
+
+Talking point — the honest scaling result: *"Same circuit family at 6 qubits:
+43 % more parameters, the same number of episodes to a first lap, and no
+faster laps (14.7 s vs 14.4 s best). At this scale extra qubits neither help
+nor hurt — a real scaling data point is worth more than a hype slide."*
+
 ## The 5-minute demo
 
 A narrative that works cold, in order. Controls for the race segment:
@@ -140,8 +161,10 @@ A narrative that works cold, in order. Controls for the race segment:
   ```
 
 - **Fake backend: nothing else.** It is a local `FakeBackendV2` — the noise
-  model and coupling map of a retired 5-qubit IBM device, simulated on your
-  machine. No account, no network, exhibition-safe.
+  model and coupling map of a retired small IBM device (5-qubit at the
+  default circuit size; the pick is qubit-aware, e.g. 7-qubit at
+  `--profile q6`), simulated on your machine. No account, no network,
+  exhibition-safe.
 - **Real backend:** an IBM Quantum account. Create a token at
   [quantum.cloud.ibm.com](https://quantum.cloud.ibm.com), then either
   `export QISKIT_IBM_TOKEN=<token>` before starting the server, or save it
@@ -154,6 +177,7 @@ A narrative that works cold, in order. Controls for the race segment:
   python -m traqmania.hardware lap --track oval --fake        # dry-run flow
   python -m traqmania.hardware lap --track oval               # real device
   python -m traqmania.hardware sprint --track oval --fake --iterations 20
+  python -m traqmania.hardware lap --fake --profile q6        # 6-qubit variant
   ```
 
 - Never paste a token into a notebook or config file that might get
