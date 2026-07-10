@@ -131,7 +131,11 @@ def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
     if init is not None:
         qfunc.set_params(np.load(init)["params"])
         print(f"warm-started from {init}")
-    trainer = DQNTrainer(qfunc, monitor, training_cfg, rng=np.random.default_rng(seed))
+    def env_factory(track=track, config=config, seed=seed) -> RacingEnv:
+        return RacingEnv(track, config, n_envs=4, seed=seed + 10_000)
+
+    trainer = DQNTrainer(qfunc, monitor, training_cfg, rng=np.random.default_rng(seed),
+                         env_factory=env_factory)
 
     print(f"training agent={agent} track={track.name} episodes={episodes} seed={seed}")
     t0 = time.perf_counter()
@@ -156,6 +160,11 @@ def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
               f"at {monitor.first_clean_wall_s:.1f}s wall clock")
     else:
         print("first clean lap: NEVER (no clean lap this run)")
+    if "best_eval" in history:
+        be = history["best_eval"]
+        lap = f"{be['best_lap']:.1f}s" if be["best_lap"] is not None else "none"
+        print(f"saved snapshot: episode {be['episode']} "
+              f"(greedy eval: {be['laps']} laps, best {lap})")
 
     npz_path = save_weights(qfunc, agent, track.name, config, episodes,
                             out_dir=Path(out_dir) if out_dir else None)

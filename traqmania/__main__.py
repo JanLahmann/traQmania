@@ -9,7 +9,8 @@ from traqmania.config import load_config
 
 def main() -> None:
     parser = argparse.ArgumentParser(prog="traqmania", description="traQmania QRL racing demo")
-    parser.add_argument("--profile", default=None, help="config profile: pi4, pi5, exhibition, q6, q8, q10")
+    parser.add_argument("--profile", default=None,
+                        help="config profile: pi4, pi5, exhibition, q6, q8, q10")
     parser.add_argument("--config", default=None, help="path to an extra TOML overlay")
     parser.add_argument("--host", default=None)
     parser.add_argument("--port", type=int, default=None)
