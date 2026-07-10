@@ -33,6 +33,7 @@ include = ["traqmania*"]
 [tool.setuptools.package-data]
 traqmania = [
     "config/*.toml", "env/tracks/*.json", "weights/*.npz", "weights/*.json",
+    "data/ghosts/*.json",
     "web/*.html", "web/css/*.css", "web/js/*.js",
 ]
 

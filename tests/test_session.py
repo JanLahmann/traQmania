@@ -4,13 +4,21 @@ Everything drives the session via direct ``tick()`` calls (no asyncio, no
 wall-clock sleeps beyond a 1 ms GIL-yield in the training smoke test).
 """
 
+import json
 import time
 
 import numpy as np
 
 from traqmania.config import load_config
 from traqmania.server import protocol as P
-from traqmania.server.runtime import load_agent, resolve_training_cfg, track_payload
+from traqmania.server.runtime import (
+    evolution_stage_specs,
+    load_agent,
+    load_ghost,
+    resolve_training_cfg,
+    save_ghost,
+    track_payload,
+)
 from traqmania.server.session import DemoSession, keys_to_controls
 
 
@@ -155,6 +163,98 @@ def test_race_mode_human_input_drives_car():
     assert kinds == {"human", "mlp"}
 
 
+# ----------------------------------------------------------------- evolution
+
+
+def test_evolution_stage_specs_oval_and_fallback():
+    specs = evolution_stage_specs("oval")  # bundled stage snapshots
+    assert len(specs) == 4
+    assert [label for label, _ in specs] == ["ep 100", "ep 250", "ep 400", "ep 800"]
+    assert all(path.is_file() for _, path in specs)
+    # chicane has no stage files -> [warmstart, final] duplicated to 4 cars
+    fallback = evolution_stage_specs("chicane")
+    assert len(fallback) == 4
+    assert fallback[0] == fallback[2] and fallback[1] == fallback[3]
+    assert all(path.is_file() for _, path in fallback)
+
+
+def test_evolution_mode_tick_shape():
+    session = DemoSession(load_config())
+    session.handle_message(P.SetMode(mode="evolution"))
+    assert session.mode == "evolution"
+    assert len(session.cars) == 4
+
+    for _ in range(30):
+        session.tick()
+    states = [m for m in session.drain_outbox() if m["type"] == "state"]
+    assert states
+    for state in states:
+        assert P.parse_server(state).mode == "evolution"  # validates the payload shape
+        assert len(state["cars"]) == 4
+    last = states[-1]["cars"]
+    assert [c["id"] for c in last] == ["stage1", "stage2", "stage3", "stage4"]
+    assert all(c["kind"] == "quantum" for c in last)
+    assert [c["label"] for c in last] == ["ep 100", "ep 250", "ep 400", "ep 800"]
+    assert all("ghost" not in c for c in last)
+    assert any(c["v"] > 0.0 for c in last)
+
+
+# --------------------------------------------------------------------- ghost
+
+
+def make_fake_ghost(track, n_points: int = 40) -> dict:
+    """Circular fake best-lap trajectory roughly following the track start pose."""
+    x0, y0, theta0 = track.start_pose()
+    pts = [[x0 + i * 0.5, y0, theta0] for i in range(n_points)]
+    return {"lap_time": 12.3, "kind": "quantum", "points": pts}
+
+
+def test_ghost_save_load_round_trip(tmp_path):
+    assert load_ghost("oval", tmp_path) is None
+    ghost = {"lap_time": 21.5, "kind": "mlp", "points": [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]}
+    path = save_ghost("oval", ghost, tmp_path)
+    assert path == tmp_path / "oval.json"
+    assert load_ghost("oval", tmp_path) == ghost
+    # invalid records are rejected
+    (tmp_path / "gp.json").write_text(json.dumps({"lap_time": 5.0, "points": []}))
+    assert load_ghost("gp", tmp_path) is None
+
+
+def test_attract_streams_injected_ghost_car(tmp_path):
+    config = load_config()
+    session = DemoSession(config, ghosts_dir=tmp_path)  # no ghost yet
+    session.tick()
+    state = [m for m in session.drain_outbox() if m["type"] == "state"]
+    assert all(c["id"] != "ghost" for s in state for c in s["cars"])
+
+    save_ghost("oval", make_fake_ghost(session.track), tmp_path)
+    session = DemoSession(config, ghosts_dir=tmp_path)
+    for _ in range(30):
+        session.tick()
+    states = [m for m in session.drain_outbox() if m["type"] == "state"]
+    assert states
+    ghosts = []
+    for s in states:
+        P.parse_server(s)  # validates ghost/label fields on the wire
+        ghost = next(c for c in s["cars"] if c["id"] == "ghost")
+        assert ghost["ghost"] is True
+        assert ghost["kind"] == "quantum"
+        assert ghost["label"] == "best 12.3s"
+        assert ghost["last_lap_time"] == 12.3
+        ghosts.append(ghost)
+    # the replay interpolates along the stored points, so the ghost moves
+    assert ghosts[-1]["x"] != ghosts[0]["x"]
+
+    # race mode also streams the ghost alongside human + opponent
+    session.handle_message(P.Race(action="start", opponent="quantum"))
+    session.tick()
+    session.tick()
+    session.tick()
+    race_states = [m for m in session.drain_outbox() if m["type"] == "state"]
+    ids = {c["id"] for c in race_states[-1]["cars"]}
+    assert ids == {"human", "quantum", "ghost"}
+
+
 # ------------------------------------------------------------------ training
 
 
@@ -191,6 +291,9 @@ def test_training_mode_smoke():
     sample = telemetry[-1]
     assert P.parse_server(sample).agent == "mlp"  # validates full telemetry shape
     assert len(sample["returns_tail"]) <= 100
+    assert "best_lap_s" in sample and "lap_times" in sample
+    assert isinstance(sample["lap_times"], list) and len(sample["lap_times"]) <= 50
+    assert all(isinstance(e, int) and isinstance(t, float) for e, t in sample["lap_times"])
     assert sample["episode"] == 7  # 8 episodes, 0-indexed last callback
     history = session.jobs["mlp"].history
     assert history is not None and "best_eval" in history

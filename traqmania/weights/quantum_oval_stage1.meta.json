@@ -1,0 +1,8 @@
+{
+  "agent": "quantum",
+  "track": "oval",
+  "config_hash": "463b238dadcb",
+  "episodes": 100,
+  "stage": 1,
+  "date": "DATE"
+}

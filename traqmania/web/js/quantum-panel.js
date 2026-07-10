@@ -79,7 +79,7 @@ export class QuantumPanel {
     if (qs.length) {
       const min = Math.min(...qs);
       const max = Math.max(...qs);
-      const span = Math.max(max - min, 1e-9);
+      const span = max - min + 1e-9; // normalize so within-update differences are visible
       for (let i = 0; i < this.bars.length; i++) {
         const q = qs[i] ?? min;
         const pct = 8 + ((q - min) / span) * 92; // keep a visible stub for the min

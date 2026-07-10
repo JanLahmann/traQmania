@@ -5,7 +5,7 @@ import { RaceRenderer, KIND_COLORS } from "./race.js";
 import { initInput, setInputActive } from "./input.js";
 import { QuantumPanel } from "./quantum-panel.js";
 import { renderCircuit } from "./circuit.js";
-import { TrainingChart } from "./charts.js";
+import { TrainingChart, LapChart } from "./charts.js";
 import { AttractManager } from "./attract.js";
 import { initExplain } from "./explain.js";
 
@@ -32,6 +32,7 @@ const quantumPanel = new QuantumPanel({
 });
 
 const chart = new TrainingChart($("#training-chart"));
+const lapChart = new LapChart($("#lap-chart"));
 
 const attract = new AttractManager({
   captionEl: $("#attract-caption"),
@@ -75,8 +76,15 @@ function applyMode(mode) {
   $("#race-controls").hidden = mode !== "race";
   setInputActive(mode === "race");
   attract.setMode(mode);
+  renderer.setMode(mode);
+  $("#evo-caption").hidden = mode !== "evolution";
+  if (mode !== "evolution") {
+    $("#evo-legend").hidden = true;
+    evoLegendKey = "";
+  }
+  renderEpisodeOverlay();
   if (mode === "train") selectTab("training");
-  else if (mode === "attract") selectTab("quantum");
+  else if (mode === "attract" || mode === "evolution") selectTab("quantum");
 }
 
 function selectTab(name) {
@@ -107,16 +115,87 @@ function renderLapboard(cars) {
   const board = $("#lapboard");
   const rows = cars.map((car) => {
     const best = state.bestLaps.get(car.id);
-    const color = KIND_COLORS[car.kind] || "#ccc";
+    if (car.ghost) {
+      // ghosts stay off the board except for a dim "Ghost (best …)" entry
+      const t = typeof best === "number" ? best : car.last_lap_time;
+      const text =
+        typeof t === "number" && isFinite(t)
+          ? `Ghost (best ${fmtLap(t)})`
+          : car.label
+            ? `Ghost — ${car.label}`
+            : "Ghost";
+      return `<div class="lap-row ghost">
+        <span class="dot ghost-dot"></span>
+        <span class="lap-kind">${text}</span>
+      </div>`;
+    }
+    const evo = state.mode === "evolution" && car.label;
+    const color = evo ? renderer.stageColor(car.label) : KIND_COLORS[car.kind] || "#ccc";
+    const name = evo ? car.label : KIND_NAMES[car.kind] || car.kind;
     return `<div class="lap-row${car.off_track ? " off" : ""}">
       <span class="dot" style="background:${color}"></span>
-      <span class="lap-kind">${KIND_NAMES[car.kind] || car.kind}</span>
+      <span class="lap-kind">${name}</span>
       <span class="lap-cell">Lap <b>${car.lap}</b></span>
       <span class="lap-cell">Last <b>${fmtLap(car.last_lap_time)}</b></span>
       <span class="lap-cell">Best <b>${fmtLap(best)}</b></span>
     </div>`;
   });
   board.innerHTML = rows.join("");
+}
+
+// -- evolution legend ----------------------------------------------------------
+
+let evoLegendKey = "";
+
+function updateEvoLegend(cars) {
+  if (state.mode !== "evolution") return;
+  const labeled = cars.filter((c) => c.label);
+  const key = labeled.map((c) => `${c.label}${c.ghost ? "*" : ""}`).join("|");
+  if (key === evoLegendKey) return;
+  evoLegendKey = key;
+  const el = $("#evo-legend");
+  el.hidden = labeled.length === 0;
+  el.innerHTML = labeled
+    .map((c) => {
+      if (c.ghost) {
+        return `<div class="legend-row ghost"><span class="dot ghost-dot"></span>${c.label}</div>`;
+      }
+      const color = renderer.stageColor(c.label);
+      return `<div class="legend-row"><span class="dot" style="background:${color}"></span>${c.label}</div>`;
+    })
+    .join("");
+}
+
+// -- episode counter + best-lap banner -----------------------------------------
+
+const episodeByAgent = new Map(); // agent -> latest episode
+
+function renderEpisodeOverlay() {
+  const el = $("#episode-overlay");
+  if (state.mode !== "train" || episodeByAgent.size === 0) {
+    el.hidden = true;
+    return;
+  }
+  el.hidden = false;
+  el.innerHTML = [...episodeByAgent.entries()]
+    .map(
+      ([agent, ep]) =>
+        `<div class="ep-line" style="color:${KIND_COLORS[agent] || "#e6e9ef"}">ep ${ep}</div>`,
+    )
+    .join("");
+}
+
+function showBestBanner(lapTime) {
+  const el = $("#best-banner");
+  el.textContent = `NEW BEST LAP ${lapTime.toFixed(2)}s`;
+  el.hidden = false;
+  el.classList.remove("banner-in");
+  void el.offsetWidth; // retrigger the animation
+  el.classList.add("banner-in");
+  clearTimeout(showBestBanner._id);
+  showBestBanner._id = setTimeout(() => {
+    el.hidden = true;
+  }, 1600);
 }
 
 // -- websocket handlers ------------------------------------------------------
@@ -152,6 +231,7 @@ net.on("state", (msg) => {
   state.lastState = msg;
   renderer.pushState(msg);
   renderLapboard(msg.cars || []);
+  updateEvoLegend(msg.cars || []);
   if (msg.mode && msg.mode !== state.mode) applyMode(msg.mode); // server-driven mode change
 });
 
@@ -159,6 +239,13 @@ net.on("quantum", (msg) => quantumPanel.update(msg));
 
 net.on("telemetry", (msg) => {
   chart.addPoint(msg.agent, msg.episode, msg.mean_return, msg.epsilon);
+  if (msg.lap_times !== undefined || msg.best_lap_s != null) {
+    lapChart.setAgentData(msg.agent, msg.lap_times, msg.best_lap_s);
+  }
+  if (typeof msg.episode === "number") {
+    episodeByAgent.set(msg.agent, msg.episode);
+    renderEpisodeOverlay();
+  }
   updateTrainStats(msg);
 });
 
@@ -179,6 +266,17 @@ net.on("event", (msg) => {
     case "crash":
       if (msg.car_id) renderer.addEffect("crash", msg.car_id);
       break;
+    case "new_best_lap":
+      if (typeof msg.lap_time === "number") {
+        showBestBanner(msg.lap_time);
+        if (msg.car_id) {
+          const best = state.bestLaps.get(msg.car_id);
+          if (best === undefined || msg.lap_time < best) {
+            state.bestLaps.set(msg.car_id, msg.lap_time);
+          }
+        }
+      }
+      break;
     case "training_done":
       state.training = false;
       $("#train-start").disabled = false;
@@ -191,7 +289,12 @@ net.on("error", (msg) => toast(msg.message || "server error"));
 
 // -- UI wiring ---------------------------------------------------------------
 
-const MODE_FOR_BUTTON = { attract: "attract", train: "train", race: "race" };
+const MODE_FOR_BUTTON = {
+  attract: "attract",
+  train: "train",
+  evolution: "evolution",
+  race: "race",
+};
 
 for (const btn of document.querySelectorAll(".mode-btn")) {
   btn.addEventListener("click", () => {
@@ -219,6 +322,9 @@ $("#train-start").addEventListener("click", () => {
   const agent = $("#train-agent").value;
   const episodes = parseInt($("#train-episodes").value, 10);
   chart.reset();
+  lapChart.reset();
+  episodeByAgent.clear();
+  renderEpisodeOverlay();
   state.training = true;
   $("#train-start").disabled = true;
   net.trainCmd("start", agent, {

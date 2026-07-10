@@ -11,13 +11,13 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
-MODES = ("attract", "train", "race")
+MODES = ("attract", "train", "race", "evolution")
 TRAIN_AGENTS = ("quantum", "mlp", "both")
 OPPONENTS = ("quantum", "mlp")
 TRAIN_ACTIONS = ("start", "stop")
 RACE_ACTIONS = ("start", "reset")
 CAR_KINDS = ("human", "quantum", "mlp")
-EVENT_KINDS = ("lap", "crash", "clean_lap", "training_done")
+EVENT_KINDS = ("lap", "crash", "clean_lap", "training_done", "new_best_lap")
 
 # input.keys bitmask
 KEY_THROTTLE, KEY_BRAKE, KEY_LEFT, KEY_RIGHT = 1, 2, 4, 8
@@ -88,6 +88,8 @@ class CarState:
     last_lap_time: float | None
     off_track: bool
     rays: list | None = None
+    label: str | None = None  # e.g. "ep 150" (evolution) or "best 19.8s" (ghost)
+    ghost: bool | None = None  # True for the best-lap replay car
 
 
 @dataclass(frozen=True)
@@ -131,6 +133,8 @@ class Telemetry:
     epsilon: float
     loss: float | None
     returns_tail: list
+    best_lap_s: float | None = None
+    lap_times: list | None = None  # of [episode:int, lap_s:float], last <= 50
     TYPE: ClassVar[str] = "telemetry"
 
 
@@ -157,7 +161,8 @@ _OMIT_IF_NONE: dict[str, set[str]] = {
     Train.TYPE: {"track", "episodes"},
     Race.TYPE: {"track"},
     Event.TYPE: {"car_id", "lap_time", "agent"},
-    CarState.__name__: {"rays"},
+    Telemetry.TYPE: {"best_lap_s", "lap_times"},
+    CarState.__name__: {"rays", "label", "ghost"},
 }
 
 
@@ -226,6 +231,18 @@ def _num_list(value: Any, name: str, length: int | None = None) -> list:
     if length is not None and len(value) != length:
         raise ProtocolError(f"'{name}' must have length {length}, got {len(value)}")
     return [_float(v, name) for v in value]
+
+
+def _lap_times(value: Any, name: str) -> list:
+    """List of [episode:int, lap_s:float] pairs."""
+    if not isinstance(value, list):
+        raise ProtocolError(f"'{name}' must be a list")
+    out = []
+    for item in value:
+        if not isinstance(item, list) or len(item) != 2:
+            raise ProtocolError(f"'{name}' entries must be [episode, lap_s] pairs")
+        out.append([_int(item[0], f"{name}[].episode", 0), _float(item[1], f"{name}[].lap_s")])
+    return out
 
 
 def _check_extra(data: dict, allowed: set[str]) -> None:
@@ -320,6 +337,8 @@ def _parse_car(d: Any) -> CarState:
         last_lap_time=_opt_float(d, "last_lap_time"),
         off_track=_bool(_req(d, "off_track"), "off_track"),
         rays=_num_list(d["rays"], "rays") if d.get("rays") is not None else None,
+        label=_str(d["label"], "label") if d.get("label") is not None else None,
+        ghost=_bool(d["ghost"], "ghost") if d.get("ghost") is not None else None,
     )
 
 
@@ -362,6 +381,9 @@ def _parse_telemetry(d: dict) -> Telemetry:
         epsilon=_float(_req(d, "epsilon"), "epsilon"),
         loss=_opt_float(d, "loss"),
         returns_tail=_num_list(_req(d, "returns_tail"), "returns_tail"),
+        best_lap_s=_opt_float(d, "best_lap_s"),
+        lap_times=_lap_times(d["lap_times"], "lap_times")
+        if d.get("lap_times") is not None else None,
     )
 
 

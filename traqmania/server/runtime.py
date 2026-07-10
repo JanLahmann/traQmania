@@ -16,6 +16,8 @@ from traqmania.config import load_config
 from traqmania.env.track import TRACKS_DIR, Track
 
 WEIGHTS_DIR = Path(__file__).resolve().parent.parent / "weights"
+GHOSTS_DIR = Path(__file__).resolve().parent.parent / "data" / "ghosts"
+N_EVOLUTION_STAGES = 4
 
 
 def available_tracks() -> list[str]:
@@ -46,6 +48,71 @@ def load_agent(kind: str, track_name: str, warm: bool = False, config: dict | No
     path = WEIGHTS_DIR / f"{kind}_{track_name}{suffix}.npz"
     qfunc.set_params(np.load(path)["params"])
     return qfunc
+
+
+def _weights_label(path: Path, fallback: str) -> str:
+    """Evolution-car label from a weights file's .meta.json ('ep N'), or ``fallback``."""
+    meta_path = path.with_suffix("").with_suffix(".meta.json")
+    try:
+        with meta_path.open("r", encoding="utf-8") as f:
+            episodes = json.load(f)["episodes"]
+        return f"ep {int(episodes)}"
+    except (OSError, ValueError, KeyError, TypeError):
+        return fallback
+
+
+def evolution_stage_specs(track_name: str) -> list[tuple[str, Path]]:
+    """(label, weights_path) for the 4 evolution-mode cars on ``track_name``.
+
+    Prefers the bundled ``quantum_<track>_stage{1..4}.npz`` snapshots; when none
+    exist, falls back to [warmstart, final] duplicated to 4 cars.
+    """
+    specs = [
+        (_weights_label(path, f"stage {i}"), path)
+        for i in range(1, N_EVOLUTION_STAGES + 1)
+        if (path := WEIGHTS_DIR / f"quantum_{track_name}_stage{i}.npz").is_file()
+    ]
+    if specs:
+        return specs
+    warm = WEIGHTS_DIR / f"quantum_{track_name}_warmstart.npz"
+    final = WEIGHTS_DIR / f"quantum_{track_name}.npz"
+    pair = [(_weights_label(warm, "warm-start"), warm), (_weights_label(final, "trained"), final)]
+    return pair * 2
+
+
+def ghost_path(track_name: str, ghosts_dir: Path | None = None) -> Path:
+    return (ghosts_dir if ghosts_dir is not None else GHOSTS_DIR) / f"{track_name}.json"
+
+
+def load_ghost(track_name: str, ghosts_dir: Path | None = None) -> dict | None:
+    """Best-lap ghost record for ``track_name``: {lap_time, kind, points} or None.
+
+    Returns None when no ghost is stored or the file fails basic validation.
+    """
+    path = ghost_path(track_name, ghosts_dir)
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            ghost = json.load(f)
+        lap_time = float(ghost["lap_time"])
+        points = ghost["points"]
+        if lap_time <= 0.0 or not isinstance(points, list) or len(points) < 2:
+            return None
+        return {
+            "lap_time": lap_time,
+            "kind": str(ghost.get("kind", "quantum")),
+            "points": [[float(p[0]), float(p[1]), float(p[2])] for p in points],
+        }
+    except (OSError, ValueError, KeyError, TypeError, IndexError):
+        return None
+
+
+def save_ghost(track_name: str, ghost: dict, ghosts_dir: Path | None = None) -> Path:
+    """Persist a best-lap ghost record as ``<ghosts_dir>/<track>.json``."""
+    path = ghost_path(track_name, ghosts_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {"track": track_name, **ghost}
+    path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    return path
 
 
 def _track_theme(name: str) -> dict:

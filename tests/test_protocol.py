@@ -10,6 +10,7 @@ CLIENT_MSGS = [
     P.Input(keys=P.KEYS_ALL),
     P.SetMode(mode="attract"),
     P.SetMode(mode="train"),
+    P.SetMode(mode="evolution"),
     P.SetTrack(track="gp"),
     P.Train(action="start", agent="both", track="gp", warm=True, episodes=100),
     P.Train(action="start", agent="quantum"),
@@ -31,14 +32,29 @@ SERVER_MSGS = [
     ]),
     P.Quantum(car_id="quantum", expectations=[0.1, -0.2, 0.3, -0.4],
               q_values=[1.0, 2.0, 3.0, 4.0], action=3),
+    P.State(t=2.0, mode="evolution", cars=[
+        P.CarState(id="stage1", kind="quantum", x=1.0, y=2.0, theta=0.1, v=3.0,
+                   lap=0, progress=12.5, last_lap_time=None, off_track=False,
+                   label="ep 100"),
+        P.CarState(id="ghost", kind="quantum", x=0.0, y=-2.0, theta=3.1, v=9.0,
+                   lap=0, progress=0.0, last_lap_time=19.8, off_track=False,
+                   label="best 19.8s", ghost=True),
+    ]),
     P.Telemetry(agent="mlp", episode=17, mean_return=42.0, epsilon=0.3,
                 loss=0.01, returns_tail=[1.0, 2.0]),
     P.Telemetry(agent="quantum", episode=0, mean_return=0.0, epsilon=1.0,
                 loss=None, returns_tail=[]),
+    P.Telemetry(agent="quantum", episode=99, mean_return=10.0, epsilon=0.1,
+                loss=0.5, returns_tail=[3.0], best_lap_s=18.7,
+                lap_times=[[42, 21.4], [77, 18.7]]),
+    P.Telemetry(agent="mlp", episode=3, mean_return=1.0, epsilon=0.9,
+                loss=None, returns_tail=[1.0], best_lap_s=None, lap_times=[]),
     P.Event(kind="lap", car_id="human", lap_time=19.9),
     P.Event(kind="clean_lap", car_id="quantum", lap_time=18.2),
     P.Event(kind="crash", car_id="mlp"),
     P.Event(kind="training_done", agent="quantum"),
+    P.Event(kind="new_best_lap", car_id="human", lap_time=17.5),
+    P.Event(kind="new_best_lap", agent="quantum", lap_time=18.1),
     P.Error(message="boom"),
 ]
 
@@ -66,12 +82,28 @@ def test_optional_none_fields_omitted_from_wire():
     wire = P.serialize(P.Telemetry(agent="mlp", episode=0, mean_return=0.0,
                                    epsilon=1.0, loss=None, returns_tail=[]))
     assert wire["loss"] is None
-    # rays omitted per-car when absent.
+    # rays/label/ghost omitted per-car when absent.
     car = P.CarState(id="a", kind="mlp", x=0, y=0, theta=0, v=0, lap=0,
                      progress=0, last_lap_time=None, off_track=False)
     wire = P.serialize(P.State(t=0.0, mode="attract", cars=[car]))
     assert "rays" not in wire["cars"][0]
+    assert "label" not in wire["cars"][0] and "ghost" not in wire["cars"][0]
     assert wire["cars"][0]["last_lap_time"] is None
+    # telemetry best_lap_s / lap_times omitted when absent (pre-M10 shape).
+    wire = P.serialize(P.Telemetry(agent="mlp", episode=0, mean_return=0.0,
+                                   epsilon=1.0, loss=None, returns_tail=[]))
+    assert "best_lap_s" not in wire and "lap_times" not in wire
+
+
+def test_telemetry_lap_times_validation():
+    base = {"type": "telemetry", "agent": "mlp", "episode": 0, "mean_return": 0.0,
+            "epsilon": 1.0, "loss": None, "returns_tail": []}
+    # explicit null best_lap_s is accepted
+    msg = P.parse_server({**base, "best_lap_s": None, "lap_times": [[3, 21.5]]})
+    assert msg.best_lap_s is None and msg.lap_times == [[3, 21.5]]
+    for bad in ("nope", [[1.5, 2.0]], [[1, 2.0, 3.0]], [[1]], [21.5], [[-1, 2.0]]):
+        with pytest.raises(P.ProtocolError):
+            P.parse_server({**base, "lap_times": bad})
 
 
 GARBAGE = [

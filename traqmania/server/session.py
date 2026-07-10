@@ -21,6 +21,7 @@ import math
 import threading
 import time
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Any
 
 import numpy as np
@@ -35,14 +36,19 @@ from traqmania.env.racing_env import RacingEnv
 from traqmania.server import protocol
 from traqmania.server.runtime import (
     available_tracks,
+    evolution_stage_specs,
     load_agent,
+    load_ghost,
     load_track,
     resolve_training_cfg,
+    save_ghost,
     track_payload,
 )
 
 HUMAN_RESPAWN_DELAY_S = 1.0
 QUANTUM_MSG_MIN_INTERVAL_S = 0.099  # <= 10 Hz
+LAP_TIMES_KEEP = 50  # telemetry keeps the last N (episode, lap_s) pairs
+GHOST_TRAJ_MAX_POINTS = 20_000  # ~33 min at 10 Hz; laps beyond this are not recorded
 
 
 def keys_to_controls(keys: int) -> tuple[float, float, float]:
@@ -80,6 +86,9 @@ class _Car:
     controls: tuple[float, float, float] = (0.0, 0.0, 0.0)
     rays: list | None = None
     respawn_at: float | None = None  # sim time to respawn a frozen (crashed) human
+    label: str | None = None  # shown next to the car (e.g. "ep 250" in evolution mode)
+    traj: list = field(default_factory=list)  # (x, y, theta) at decision rate, this lap
+    traj_full: bool = True  # False once the trajectory overflowed and was dropped
 
 
 @dataclass
@@ -99,13 +108,56 @@ class TrainingJob:
     history: dict | None = None
     error: str | None = None
     announced: bool = False  # training_done already emitted
+    lap_times: list = field(default_factory=list)  # [episode, lap_s] pairs, last <= 50
+    best_lap_s: float | None = None
+    best_announced: float | None = None  # last best_lap_s emitted as new_best_lap
+
+
+class _TrainingLapMonitor:
+    """Env wrapper fed to :class:`DQNTrainer` that records completed lap times.
+
+    Runs on the training thread; appends (episode, lap_s) pairs and the best
+    lap into the shared :class:`TrainingJob` fields under ``job.lock`` so the
+    session tick can read them for telemetry / new_best_lap events.
+    """
+
+    def __init__(self, env: RacingEnv, job: TrainingJob | None = None) -> None:
+        self.env = env
+        self.job = job  # assigned right after the TrainingJob is built
+        self.episodes_done = 0
+        self._prev_lap = np.zeros(env.n_envs, dtype=np.int64)
+
+    def reset(self) -> np.ndarray:
+        obs = self.env.reset()
+        self._prev_lap[:] = 0
+        return obs
+
+    def step(self, actions: np.ndarray):
+        obs, reward, done, info = self.env.step(actions)
+        lap = np.asarray(info["lap"])
+        lap_done = lap > self._prev_lap
+        if np.any(lap_done):
+            times = np.asarray(info["last_lap_time"])[lap_done]
+            job = self.job
+            with job.lock:
+                for lap_s in times:
+                    if math.isnan(lap_s):
+                        continue
+                    job.lap_times.append([self.episodes_done, float(lap_s)])
+                    if job.best_lap_s is None or lap_s < job.best_lap_s:
+                        job.best_lap_s = float(lap_s)
+                del job.lap_times[:-LAP_TIMES_KEEP]
+        self._prev_lap = np.where(done, 0, lap)
+        self.episodes_done += int(np.sum(done))
+        return obs, reward, done, info
 
 
 class DemoSession:
     """Single shared demo session (one kiosk): mode state machine + tick loop."""
 
-    def __init__(self, config: dict):
+    def __init__(self, config: dict, ghosts_dir: Path | None = None):
         self.config = config
+        self._ghosts_dir = ghosts_dir  # None -> bundled traqmania/data/ghosts
         physics = config["physics"]
         self.dt = float(physics["dt"])
         self.substeps_per_decision = int(physics["substeps_per_decision"])
@@ -130,6 +182,7 @@ class DemoSession:
         self.mode = "attract"
         self.track_name = str(config["track"]["default"])
         self.track = load_track(config, self.track_name)
+        self._ghost: dict | None = load_ghost(self.track_name, self._ghosts_dir)
         self.cars: list[_Car] = []
         self.jobs: dict[str, TrainingJob] = {}
         self._enter_attract()
@@ -191,6 +244,8 @@ class DemoSession:
             self._enter_attract()
         elif mode == "race":
             self._enter_race("quantum")
+        elif mode == "evolution":
+            self._enter_evolution()
         else:  # train: cars appear once a train{start} arrives
             self.cars = []
 
@@ -203,12 +258,15 @@ class DemoSession:
             return False
         self.track = load_track(self.config, name)
         self.track_name = name
+        self._ghost = load_ghost(name, self._ghosts_dir)
         self._outbox.append({"type": "track", "track": track_payload(self.track)})
         if self.mode == "attract":
             self._enter_attract()
         elif self.mode == "race":
             opponent = next((c.kind for c in self.cars if c.kind != "human"), "quantum")
             self._enter_race(opponent)
+        elif self.mode == "evolution":
+            self._enter_evolution()
         return True
 
     def _enter_attract(self) -> None:
@@ -229,6 +287,22 @@ class DemoSession:
                    qfunc=self._agent_cache[key])
         self._respawn(car)
         return car
+
+    def _enter_evolution(self) -> None:
+        """4 quantum cars driving different training-stage weights, labelled 'ep N'."""
+        x, y, theta = self.track.start_pose()
+        cars = []
+        for i, (label, path) in enumerate(evolution_stage_specs(self.track_name), start=1):
+            key = ("stage", path.name)
+            if key not in self._agent_cache:
+                qfunc = QuantumQFunction(self.config["circuit"])
+                qfunc.set_params(np.load(path)["params"])
+                self._agent_cache[key] = qfunc
+            car = _Car(id=f"stage{i}", kind="quantum", state=np.array([x, y, theta, 0.0]),
+                       qfunc=self._agent_cache[key], label=label)
+            self._respawn(car)
+            cars.append(car)
+        self.cars = cars
 
     def _handle_race(self, msg: protocol.Race) -> None:
         if msg.track is not None and not self._set_track(msg.track):
@@ -280,10 +354,12 @@ class DemoSession:
             return RacingEnv(track, config, n_envs=4, seed=seed + 10_000)
 
         stop_event = threading.Event()
-        trainer = DQNTrainer(qfunc, env, tcfg, rng=np.random.default_rng(seed),
+        monitor = _TrainingLapMonitor(env)  # records lap times into the job (set below)
+        trainer = DQNTrainer(qfunc, monitor, tcfg, rng=np.random.default_rng(seed),
                              env_factory=env_factory, stop_event=stop_event)
         job = TrainingJob(agent=agent, env=env, trainer=trainer, stop_event=stop_event,
                           epsilon=float(tcfg["epsilon_start"]))
+        monitor.job = job
 
         def callback(episode: int, stats: dict, job: TrainingJob = job) -> None:
             with job.lock:
@@ -317,6 +393,8 @@ class DemoSession:
         with job.lock:
             tail = [float(r) for r in job.returns[-100:]]
             episode, epsilon, loss = job.episode, job.epsilon, job.loss
+            best_lap_s = job.best_lap_s
+            lap_times = [[int(e), float(t)] for e, t in job.lap_times[-LAP_TIMES_KEEP:]]
         if not tail and not final:
             return
         if loss is not None and (not isinstance(loss, int | float) or math.isnan(loss)):
@@ -329,11 +407,18 @@ class DemoSession:
             "epsilon": float(epsilon),
             "loss": None if loss is None else float(loss),
             "returns_tail": tail,
+            "best_lap_s": None if best_lap_s is None else float(best_lap_s),
+            "lap_times": lap_times,
         })
 
     def _tick_train(self) -> None:
         if self._substep % self.telemetry_every == 0:
             for job in self.jobs.values():
+                with job.lock:
+                    best = job.best_lap_s
+                if best is not None and (job.best_announced is None or best < job.best_announced):
+                    job.best_announced = best
+                    self._event("new_best_lap", agent=job.agent, lap_time=float(best))
                 if not job.announced:
                     self._emit_telemetry(job)
         for job in self.jobs.values():
@@ -373,7 +458,10 @@ class DemoSession:
     def _decide(self) -> None:
         """10 Hz agent decisions: greedy action per agent car, quantum introspection."""
         for car in self.cars:
-            if car.qfunc is None or car.respawn_at is not None:
+            if car.respawn_at is not None:
+                continue
+            self._record_traj(car)
+            if car.qfunc is None:
                 continue
             obs = self._car_obs(car)
             q = car.qfunc.q_values(obs)[0]
@@ -425,7 +513,10 @@ class DemoSession:
                 self._event("lap", car_id=car.id, lap_time=lap_time)
                 if not car.lap_dirty:
                     self._event("clean_lap", car_id=car.id, lap_time=lap_time)
+                    self._maybe_record_ghost(car, lap_time)
                 car.lap_dirty = False
+                car.traj.clear()
+                car.traj_full = True
 
             car.off_track = bool(abs(lateral[i]) > self.track.half_width)
             if car.off_track:
@@ -451,6 +542,60 @@ class DemoSession:
         car.action = 0
         car.controls = (0.0, 0.0, 0.0)
         car.rays = None
+        car.traj.clear()
+        car.traj_full = True
+
+    # ------------------------------------------------------------- ghost laps
+
+    def _record_traj(self, car: _Car) -> None:
+        """Append the car's pose to its per-lap trajectory (decision rate)."""
+        if len(car.traj) >= GHOST_TRAJ_MAX_POINTS:  # runaway lap: stop recording it
+            car.traj.clear()
+            car.traj_full = False
+            return
+        car.traj.append((float(car.state[0]), float(car.state[1]), float(car.state[2])))
+
+    def _maybe_record_ghost(self, car: _Car, lap_time: float) -> None:
+        """Persist a clean lap as the track's best-lap ghost when it beats the record."""
+        if not car.traj_full or len(car.traj) < 2:
+            return
+        if self._ghost is not None and lap_time >= self._ghost["lap_time"]:
+            return
+        x, y, theta = (float(c) for c in car.state[:3])
+        ghost = {
+            "lap_time": float(lap_time),
+            "kind": car.kind,
+            "points": [list(p) for p in car.traj] + [[x, y, theta]],
+        }
+        save_ghost(self.track_name, ghost, self._ghosts_dir)
+        self._ghost = ghost
+        self._event("new_best_lap", car_id=car.id, lap_time=float(lap_time))
+
+    def _ghost_payload(self) -> dict:
+        """Best-lap ghost replay car, looping its 10 Hz trajectory lerped to 60 Hz."""
+        ghost = self._ghost
+        points = ghost["points"]
+        n = len(points)
+        phase = self._substep / self.substeps_per_decision  # trajectory index at 60 Hz
+        frac = phase - math.floor(phase)
+        i0 = int(math.floor(phase)) % n
+        p0, p1 = points[i0], points[(i0 + 1) % n]
+        dtheta = (p1[2] - p0[2] + math.pi) % (2.0 * math.pi) - math.pi  # shortest arc
+        decision_dt = self.dt * self.substeps_per_decision
+        return {
+            "id": "ghost",
+            "kind": ghost["kind"],
+            "x": p0[0] + (p1[0] - p0[0]) * frac,
+            "y": p0[1] + (p1[1] - p0[1]) * frac,
+            "theta": p0[2] + dtheta * frac,
+            "v": math.hypot(p1[0] - p0[0], p1[1] - p0[1]) / decision_dt,
+            "lap": 0,
+            "progress": 0.0,
+            "last_lap_time": ghost["lap_time"],
+            "off_track": False,
+            "ghost": True,
+            "label": f"best {ghost['lap_time']:.1f}s",
+        }
 
     # ------------------------------------------------------------ broadcasting
 
@@ -459,6 +604,8 @@ class DemoSession:
             cars = self._train_car_payloads()
         else:
             cars = [self._car_payload(car) for car in self.cars]
+            if self._ghost is not None and self.mode in ("attract", "race"):
+                cars.append(self._ghost_payload())
         self._outbox.append({"type": "state", "t": self.t, "mode": self.mode, "cars": cars})
 
     def _car_payload(self, car: _Car) -> dict:
@@ -474,6 +621,8 @@ class DemoSession:
         }
         if car.rays is not None:
             payload["rays"] = car.rays
+        if car.label is not None:
+            payload["label"] = car.label
         return payload
 
     def _train_car_payloads(self) -> list[dict]:

@@ -7,6 +7,14 @@ export const KIND_COLORS = {
   human: "#ff9f1c",
 };
 
+// Evolution mode: one colour per training stage (cool -> hot as training
+// progresses), assigned per unique car label in order of first appearance.
+export const STAGE_COLORS = ["#5c6b8a", "#3e63dd", "#7a5cff", "#e5484d", "#ff9f1c"];
+
+const TRAIL_MAX = 300; // points kept per car
+const TRAIL_BREAK_DIST = 8; // world units; larger jumps break the polyline
+const TRAIL_ALPHA = { train: 0.35, evolution: 0.22, attract: 0.13, race: 0.13 };
+
 const SURFACE_COLORS = {
   asphalt: "#2a2e37",
   concrete: "#3a3d44",
@@ -100,6 +108,9 @@ export class RaceRenderer {
     this.showRays = true;
     this.running = false;
     this._dirtyLayer = true;
+    this.mode = "attract";
+    this.trails = new Map(); // car id -> {car, pts: [[x,y]|null, ...]}
+    this._stageColors = new Map(); // evolution label -> palette colour
 
     const ro = new ResizeObserver(() => this._resize());
     ro.observe(canvas.parentElement || canvas);
@@ -122,6 +133,8 @@ export class RaceRenderer {
     this.prev = null;
     this.cur = null;
     this.effects.length = 0;
+    this.trails.clear();
+    this._stageColors.clear();
     this._fitCamera();
     this._dirtyLayer = true;
   }
@@ -129,6 +142,19 @@ export class RaceRenderer {
   pushState(msg) {
     this.prev = this.cur;
     this.cur = { msg, recv: performance.now() };
+    this._updateTrails(msg.cars || []);
+  }
+
+  setMode(mode) {
+    this.mode = mode;
+  }
+
+  /** Stable palette colour for an evolution stage label. */
+  stageColor(label) {
+    if (!this._stageColors.has(label)) {
+      this._stageColors.set(label, STAGE_COLORS[this._stageColors.size % STAGE_COLORS.length]);
+    }
+    return this._stageColors.get(label);
   }
 
   addEffect(kind, carId) {
@@ -147,6 +173,40 @@ export class RaceRenderer {
   }
 
   // -- internals -------------------------------------------------------------
+
+  /** Ring buffer of recent positions per (non-ghost) car, fed per ws frame. */
+  _updateTrails(cars) {
+    const seen = new Set();
+    for (const car of cars) {
+      seen.add(car.id);
+      if (car.ghost) {
+        this.trails.delete(car.id);
+        continue;
+      }
+      let tr = this.trails.get(car.id);
+      if (!tr) {
+        tr = { car, pts: [] };
+        this.trails.set(car.id, tr);
+      }
+      tr.car = car;
+      const pts = tr.pts;
+      const last = pts.length ? pts[pts.length - 1] : null;
+      // respawn/teleport: break the polyline instead of drawing a chord
+      if (last && Math.hypot(car.x - last[0], car.y - last[1]) > TRAIL_BREAK_DIST) {
+        pts.push(null);
+      }
+      pts.push([car.x, car.y]);
+      while (pts.length > TRAIL_MAX) pts.shift();
+    }
+    for (const id of [...this.trails.keys()]) {
+      if (!seen.has(id)) this.trails.delete(id);
+    }
+  }
+
+  _carColor(car) {
+    if (this.mode === "evolution" && car.label && !car.ghost) return this.stageColor(car.label);
+    return KIND_COLORS[car.kind] || "#c8c8c8";
+  }
 
   _resize() {
     const host = this.canvas.parentElement || document.body;
@@ -304,6 +364,7 @@ export class RaceRenderer {
     const byId = new Map(cars.map((c) => [c.id, c]));
 
     this._applyWorld(ctx);
+    this._drawTrails(ctx);
     for (const car of cars) {
       if (this.showRays && car.kind === "quantum" && Array.isArray(car.rays)) {
         this._drawRays(ctx, car);
@@ -312,6 +373,64 @@ export class RaceRenderer {
     for (const car of cars) this._drawCar(ctx, car);
     this._drawEffects(ctx, byId);
     ctx.setTransform(1, 0, 0, 1, 0, 0);
+    this._drawLabels(ctx, cars);
+  }
+
+  /** Fading racing-line trails: one polyline per car, stroked in a few
+   *  alpha chunks (oldest faintest). Ghost cars never leave trails. */
+  _drawTrails(ctx) {
+    if (!this.trails.size) return;
+    const maxAlpha = TRAIL_ALPHA[this.mode] ?? 0.13;
+    const chunks = 4;
+    ctx.lineWidth = 0.45;
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    for (const tr of this.trails.values()) {
+      const pts = tr.pts;
+      if (pts.length < 2) continue;
+      ctx.strokeStyle = this._carColor(tr.car);
+      const per = Math.ceil(pts.length / chunks);
+      for (let c = 0; c < chunks; c++) {
+        const start = c * per;
+        const end = Math.min(pts.length - 1, (c + 1) * per);
+        if (start >= end) continue;
+        ctx.globalAlpha = maxAlpha * ((c + 1) / chunks);
+        ctx.beginPath();
+        let pen = false;
+        for (let i = start; i <= end; i++) {
+          const p = pts[i];
+          if (!p) {
+            pen = false;
+            continue;
+          }
+          if (!pen) {
+            ctx.moveTo(p[0], p[1]);
+            pen = true;
+          } else {
+            ctx.lineTo(p[0], p[1]);
+          }
+        }
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  /** Car labels ("ep 250", ghost tags) in screen space, above the car. */
+  _drawLabels(ctx, cars) {
+    const { s, ox, oy } = this.transform;
+    const dpr = window.devicePixelRatio || 1;
+    ctx.font = `600 ${11 * dpr}px system-ui, sans-serif`;
+    ctx.textAlign = "center";
+    ctx.textBaseline = "bottom";
+    for (const car of cars) {
+      if (!car.label) continue;
+      const sx = s * car.x + ox;
+      const sy = -s * car.y + oy - s * 2.2;
+      ctx.fillStyle = car.ghost ? "rgba(230,233,239,0.45)" : "rgba(230,233,239,0.88)";
+      ctx.fillText(car.label, sx, sy);
+    }
+    ctx.textBaseline = "alphabetic";
   }
 
   _drawRays(ctx, car) {
@@ -332,10 +451,12 @@ export class RaceRenderer {
   }
 
   _drawCar(ctx, car) {
-    const color = KIND_COLORS[car.kind] || "#c8c8c8";
+    const color = this._carColor(car);
+    const ghost = car.ghost === true;
     const L = 2.6; // car length in world units
     const W = 1.5;
     ctx.save();
+    if (ghost) ctx.globalAlpha = 0.35;
     ctx.translate(car.x, car.y);
     ctx.rotate(car.theta);
 
@@ -350,9 +471,18 @@ export class RaceRenderer {
     ctx.closePath();
     ctx.fillStyle = car.off_track ? "#6b6f7a" : color;
     ctx.fill();
-    ctx.strokeStyle = "rgba(0,0,0,0.5)";
-    ctx.lineWidth = 0.12;
-    ctx.stroke();
+    if (ghost) {
+      // dashed white outline marks the ghost
+      ctx.setLineDash([0.6, 0.4]);
+      ctx.strokeStyle = "rgba(255,255,255,0.85)";
+      ctx.lineWidth = 0.16;
+      ctx.stroke();
+      ctx.setLineDash([]);
+    } else {
+      ctx.strokeStyle = "rgba(0,0,0,0.5)";
+      ctx.lineWidth = 0.12;
+      ctx.stroke();
+    }
 
     // cockpit dot
     ctx.beginPath();

@@ -13,6 +13,7 @@
     <nav class="modes" id="mode-buttons" aria-label="Mode">
       <button data-mode="attract" class="mode-btn">Watch</button>
       <button data-mode="train" class="mode-btn">Train</button>
+      <button data-mode="evolution" class="mode-btn">Evolution</button>
       <button data-mode="race" class="mode-btn">Race</button>
     </nav>
 
@@ -40,6 +41,9 @@
   <main id="layout">
     <section id="stage">
       <canvas id="race-canvas"></canvas>
+      <div id="episode-overlay" hidden></div>
+      <div id="best-banner" hidden></div>
+      <div id="evo-legend" hidden></div>
       <div id="toast" hidden></div>
     </section>
 
@@ -88,6 +92,8 @@
         </form>
         <h2>Learning curves</h2>
         <canvas id="training-chart" width="340" height="200"></canvas>
+        <h2>Lap times</h2>
+        <canvas id="lap-chart" width="340" height="160"></canvas>
         <div id="train-stats"></div>
       </div>
 
@@ -97,6 +103,9 @@
 
   <footer id="bottombar">
     <div id="lapboard" aria-label="Lap board"></div>
+    <div id="evo-caption" class="caption" hidden>
+      Same circuit, four training stages racing — labels show episodes trained.
+    </div>
     <div id="attract-caption" class="caption" hidden></div>
   </footer>
 

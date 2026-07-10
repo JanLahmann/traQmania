@@ -10,27 +10,33 @@ or let the script manage its own server process::
     .venv/bin/python tests/e2e_ws_drive.py --spawn
 
 Exercises the full pinned protocol: welcome payload, attract mode (moving
-quantum car + quantum introspection messages), set_track, MLP training to
-completion, warm-started quantum training, and a human-vs-quantum race with
-keyboard input and reset.  Skipped under plain ``pytest`` (it needs a running
-server and takes minutes); CI ignores it.
+quantum car + quantum introspection messages), evolution mode (labelled
+training-stage cars), set_track, MLP training to completion, warm-started
+quantum training with lap telemetry (lap_times / best_lap_s / new_best_lap),
+a human-vs-quantum race with keyboard input and reset, and the best-lap
+ghost car in attract mode.  Skipped under plain ``pytest`` (it needs a
+running server and takes minutes); CI ignores it.
 """
 
 from __future__ import annotations
 
 import argparse
 import asyncio
+import contextlib
 import json
+import math
 import socket
 import subprocess
 import sys
 import time
 import urllib.request
+from pathlib import Path
 
 import pytest
 
 DEFAULT_PORT = 8123
 BROADCAST_HZ = 20.0  # matches [server].broadcast_hz in default.toml
+GHOSTS_DIR = Path(__file__).resolve().parent.parent / "traqmania" / "data" / "ghosts"
 
 
 @pytest.mark.skip(reason="e2e: needs a live server; run `python tests/e2e_ws_drive.py`")
@@ -87,7 +93,13 @@ def check(cond: bool, what: str) -> None:
 
 
 def car_by_kind(state: dict, kind: str) -> dict | None:
-    return next((c for c in state["cars"] if c["kind"] == kind), None)
+    """First live (non-ghost) car of ``kind`` in a state message."""
+    return next(
+        (c for c in state["cars"] if c["kind"] == kind and not c.get("ghost")), None)
+
+
+def ghost_car(state: dict) -> dict | None:
+    return next((c for c in state["cars"] if c.get("ghost") is True), None)
 
 
 # ------------------------------------------------------------------ scenario
@@ -150,6 +162,29 @@ async def verify_attract(c: Client) -> None:
     print(f"  ok: all {len(quantum)} quantum msgs have 4 expectations in [-1, 1]")
 
 
+async def verify_evolution(c: Client) -> None:
+    print("[ws] evolution mode: >=3 labelled training-stage cars")
+    await c.send(type="set_mode", mode="evolution")
+    first = await c.wait_for(
+        lambda m: m["type"] == "state" and m["mode"] == "evolution",
+        timeout=30, desc="evolution state")
+    labelled = [car for car in first["cars"]
+                if isinstance(car.get("label"), str) and not car.get("ghost")]
+    check(len(labelled) >= 3,
+          f"evolution state has >=3 labelled cars ({len(labelled)}: "
+          f"{[car['label'] for car in labelled]})")
+    check(all(car["kind"] == "quantum" for car in labelled), "stage cars are quantum")
+    duration = 2.0
+    states = [m for m in await c.collect(duration)
+              if m["type"] == "state" and m["mode"] == "evolution"]
+    check(len(states) >= BROADCAST_HZ * 0.5 * duration,
+          f"evolution states streaming ({len(states)} in {duration}s)")
+    xs = [car["x"] for s in states for car in s["cars"] if not car.get("ghost")]
+    ys = [car["y"] for s in states for car in s["cars"] if not car.get("ghost")]
+    spread = (max(xs) - min(xs)) + (max(ys) - min(ys))
+    check(spread > 1.0, f"evolution cars move (x+y spread {spread:.2f})")
+
+
 async def verify_set_track(c: Client, name: str) -> None:
     print(f"[ws] set_track {name}")
     await c.send(type="set_track", track=name)
@@ -179,22 +214,43 @@ async def verify_train_mlp(c: Client, episodes: int = 10) -> None:
     print("  ok: training_done received")
 
 
-async def verify_train_quantum_warm(c: Client, episodes: int = 12) -> None:
-    print(f"[ws] warm quantum training on oval ({episodes} episodes, stopped early)")
+async def verify_train_quantum_warm(c: Client, episodes: int = 60) -> None:
+    print(f"[ws] warm quantum training on oval ({episodes} episodes, stopped early): "
+          "lap telemetry + new_best_lap")
     await c.send(type="train", action="start", agent="quantum",
                  track="oval", warm=True, episodes=episodes)
     msg = await c.wait_for(lambda m: m["type"] == "track", timeout=30, desc="track msg (oval)")
     check(msg["track"]["name"] == "oval", "train start switched track to oval")
     telemetry: list[dict] = []
+    best_events: list[dict] = []
 
-    def got_two(m: dict) -> bool:
+    def got_laps(m: dict) -> bool:
         if m["type"] == "telemetry" and m["agent"] == "quantum":
             telemetry.append(m)
-        return len(telemetry) >= 2
+        if m["type"] == "event" and m["kind"] == "new_best_lap" and m.get("agent") == "quantum":
+            best_events.append(m)
+        if not telemetry or not best_events:
+            return False
+        last = telemetry[-1]
+        return bool(last.get("lap_times")) and last.get("best_lap_s") is not None
 
-    await c.wait_for(got_two, timeout=180, desc="2 quantum telemetry msgs")
+    await c.wait_for(got_laps, timeout=420,
+                     desc="quantum telemetry with lap_times/best_lap_s + new_best_lap event")
+    last = telemetry[-1]
     check(telemetry[-1]["episode"] >= 1, f"quantum trained episodes ({telemetry[-1]['episode']})")
     check(all(isinstance(t["returns_tail"], list) for t in telemetry), "returns_tail present")
+    laps = last["lap_times"]
+    check(isinstance(laps, list) and len(laps) <= 50, f"lap_times bounded ({len(laps)} entries)")
+    check(all(isinstance(p, list) and len(p) == 2
+              and isinstance(p[0], int) and isinstance(p[1], (int, float)) and p[1] > 0
+              for p in laps), "lap_times entries are [episode:int, lap_s:float>0] pairs")
+    best = last["best_lap_s"]
+    check(isinstance(best, (int, float)) and 0 < best <= min(t for _, t in laps) + 1e-9,
+          f"best_lap_s ({best:.2f}s) <= every recent lap time")
+    check(all(e["lap_time"] > 0 for e in best_events),
+          f"new_best_lap event(s) carry positive lap_time ({len(best_events)} seen)")
+    print(f"  ok: {len(laps)} lap_times, best_lap_s {best:.2f}s, "
+          f"{len(best_events)} new_best_lap event(s)")
     await c.send(type="train", action="stop", agent="quantum")
     await c.wait_for(
         lambda m: m["type"] == "event" and m["kind"] == "training_done"
@@ -234,6 +290,58 @@ async def verify_race(c: Client) -> None:
     print("  ok: race flow complete")
 
 
+def _inject_ghost_file(track: dict) -> None:
+    """Write a synthetic best-lap ghost for a track from its centerline."""
+    pts = track["centerline"]
+    points = []
+    for i, (x, y) in enumerate(pts):
+        nx, ny = pts[(i + 1) % len(pts)]
+        points.append([float(x), float(y), math.atan2(ny - y, nx - x)])
+    payload = {"track": track["name"], "lap_time": 0.1 * len(points),
+               "kind": "quantum", "points": points}
+    GHOSTS_DIR.mkdir(parents=True, exist_ok=True)
+    (GHOSTS_DIR / f"{track['name']}.json").write_text(json.dumps(payload) + "\n",
+                                                      encoding="utf-8")
+
+
+async def verify_attract_ghost(c: Client) -> None:
+    print("[ws] attract on oval: best-lap ghost car in state")
+    ghost_file = GHOSTS_DIR / "oval.json"
+    await c.send(type="set_track", track="oval")
+    track = (await c.wait_for(
+        lambda m: m["type"] == "track" and m["track"]["name"] == "oval",
+        timeout=30, desc="track msg (oval)"))["track"]
+    await c.send(type="set_mode", mode="attract")
+
+    def has_ghost(m: dict) -> bool:
+        return m["type"] == "state" and m["mode"] == "attract" and ghost_car(m) is not None
+
+    if not ghost_file.is_file():
+        print("  (no stored ghost yet; letting attract lap to record one)")
+        try:
+            await c.wait_for(
+                lambda m: has_ghost(m)
+                or (m["type"] == "event" and m["kind"] == "new_best_lap"),
+                timeout=120, desc="attract clean lap recording a ghost")
+        except AssertionError:
+            print("  (attract did not record a ghost in time; injecting a synthetic one)")
+            _inject_ghost_file(track)
+    check(ghost_file.is_file(), "ghost file traqmania/data/ghosts/oval.json exists")
+    # force a reload from disk so the persisted record (not just memory) is verified
+    await c.send(type="set_track", track="oval")
+    await c.wait_for(lambda m: m["type"] == "track" and m["track"]["name"] == "oval",
+                     timeout=30, desc="track msg (oval reload)")
+    state = await c.wait_for(has_ghost, timeout=30, desc="attract state with ghost car")
+    ghost = ghost_car(state)
+    check(ghost["id"] == "ghost" and ghost["kind"] in ("quantum", "mlp"),
+          f"ghost car has id 'ghost' and agent kind '{ghost['kind']}'")
+    check(isinstance(ghost.get("label"), str) and ghost["label"].startswith("best "),
+          f"ghost car labelled with best lap ({ghost.get('label')!r})")
+    check(ghost["last_lap_time"] > 0, f"ghost carries lap time ({ghost['last_lap_time']:.2f}s)")
+    check(car_by_kind(state, "quantum") is not None, "live quantum car still present")
+    print("  ok: ghost replay car streams in attract mode")
+
+
 async def drive(port: int) -> None:
     from websockets.asyncio.client import connect
 
@@ -244,15 +352,39 @@ async def drive(port: int) -> None:
         c = Client(ws)
         await verify_welcome(c)
         await verify_attract(c)
+        await verify_evolution(c)
         await verify_set_track(c, "chicane")
         await verify_train_mlp(c, episodes=10)
-        await verify_train_quantum_warm(c, episodes=12)
+        await verify_train_quantum_warm(c, episodes=60)
         await verify_race(c)
+        await verify_attract_ghost(c)
         await c.send(type="set_mode", mode="attract")  # leave the kiosk in attract
     print("\nALL E2E CHECKS PASSED")
 
 
 # --------------------------------------------------------------------- runner
+
+
+def _snapshot_ghosts() -> dict[str, str] | None:
+    """Contents of the bundled ghosts dir, or None when it does not exist."""
+    if not GHOSTS_DIR.is_dir():
+        return None
+    return {p.name: p.read_text(encoding="utf-8") for p in GHOSTS_DIR.glob("*.json")}
+
+
+def _restore_ghosts(snapshot: dict[str, str] | None) -> None:
+    """Put the ghosts dir back exactly as snapshotted (spawned-server runs only)."""
+    if not GHOSTS_DIR.is_dir():
+        return
+    for p in GHOSTS_DIR.glob("*.json"):
+        if snapshot is None or p.name not in snapshot:
+            p.unlink()
+    if snapshot is None:
+        with contextlib.suppress(OSError):
+            GHOSTS_DIR.rmdir()
+        return
+    for name, text in snapshot.items():
+        (GHOSTS_DIR / name).write_text(text, encoding="utf-8")
 
 
 def _free_port() -> int:
@@ -282,8 +414,10 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     proc = None
+    ghosts_snapshot: dict[str, str] | None = None
     port = args.port
     if args.spawn:
+        ghosts_snapshot = _snapshot_ghosts()  # restored afterwards: keep the repo clean
         port = _free_port()
         proc = subprocess.Popen([sys.executable, "-m", "traqmania", "--port", str(port)])
     try:
@@ -301,6 +435,7 @@ def main(argv: list[str] | None = None) -> int:
                 proc.wait(timeout=10)
             except subprocess.TimeoutExpired:
                 proc.kill()
+            _restore_ghosts(ghosts_snapshot)
 
 
 if __name__ == "__main__":
