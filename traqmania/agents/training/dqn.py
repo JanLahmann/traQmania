@@ -158,38 +158,47 @@ class DQNTrainer:
             self.target_params = self.qfunc.get_params()
         return float(np.mean(td**2))
 
-    def _greedy_eval(self, env, max_steps: int = 5000) -> tuple[int, float]:
+    def _greedy_eval(self, env, max_steps: int = 5000) -> tuple[int, float, float]:
         """Run ``eval_episodes`` greedy (epsilon = 0) episodes on ``env``.
 
-        Returns (laps_completed, best_lap_seconds); best_lap is +inf when no lap
-        finished.  Expects the racing-env info dict (``lap``, ``last_lap_time``);
-        envs without it simply score (0, inf).
+        Returns (laps_completed, best_lap_seconds, mean_return); best_lap is
+        +inf when no lap finished.  Expects the racing-env info dict (``lap``,
+        ``last_lap_time``); envs without it simply score (0, inf, mean_return).
         """
         obs = env.reset()
         finished = 0
         laps = 0
         best_lap = float("inf")
+        return_acc = np.zeros(obs.shape[0])
+        episode_returns: list[float] = []
         for _ in range(max_steps):
             actions = np.argmax(self.qfunc.q_values(obs), axis=1)
-            obs, _reward, done, info = env.step(actions)
+            obs, reward, done, info = env.step(actions)
+            return_acc += reward
             if isinstance(info, dict) and "lap" in info:
                 lap_times = np.asarray(info.get("last_lap_time", np.nan), dtype=np.float64)
                 if np.any(~np.isnan(lap_times)):
                     best_lap = min(best_lap, float(np.nanmin(lap_times)))
                 laps += int(np.sum(np.asarray(info["lap"])[np.flatnonzero(done)]))
+            for i in np.flatnonzero(done):
+                episode_returns.append(float(return_acc[i]))
+            return_acc[done] = 0.0
             finished += int(np.sum(done))
             if finished >= self.eval_episodes:
                 break
-        return laps, best_lap
+        mean_return = float(np.mean(episode_returns)) if episode_returns else float("-inf")
+        return laps, best_lap, mean_return
 
     def _eval_snapshot(self, best: dict | None, episode: int) -> dict:
         """Greedy-eval the current params on a fresh env; keep the best snapshot.
 
-        Score is lexicographic (laps_completed, -best_lap): more finished laps
-        wins, ties broken by the faster lap.
+        Score is lexicographic (laps_completed, -best_lap, mean_return): more
+        finished laps wins, ties broken by the faster lap, then by eval return —
+        the return tie-breaker matters before the first lap, where (0, inf)
+        would otherwise tie forever and pin the earliest (untrained) snapshot.
         """
-        laps, best_lap = self._greedy_eval(self.env_factory())
-        score = (laps, -best_lap)
+        laps, best_lap, mean_return = self._greedy_eval(self.env_factory())
+        score = (laps, -best_lap, mean_return)
         if best is None or score > best["score"]:
             best = {
                 "score": score,
