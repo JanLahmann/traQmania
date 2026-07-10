@@ -6,7 +6,7 @@ Circuit spec (n qubits, L data re-uploading blocks, acting on |0...0>):
         for qubit i: RY(x[l, i]) on qubit i        # x[l, i] = lam[l, i] * s[i]
         for qubit i: RY(theta[l, i, 0]) then RZ(theta[l, i, 1]) on qubit i
         CZ ring: CZ(0, 1), CZ(1, 2), ..., CZ(n-1, 0)
-    readout: E_a = <Z_a>, Q_a = w[a] * E_a + b[a]   # output head lives outside
+    readout: E_a = <Z_a>, Q_a = w[a] * E_a + b[a]   # a = 0..min(4, n)-1; head outside
 
 The encoding angle is exposed as a separate input Parameter ``x[l*n + i]``;
 the product ``x[l, i] = lam[l, i] * s[i]`` is computed OUTSIDE the circuit
@@ -85,6 +85,7 @@ def circuit_spec(config: dict) -> dict:
     cfg = config.get("circuit", config) if isinstance(config.get("circuit"), dict) else config
     n = int(cfg.get("n_qubits", 4))
     layers = int(cfg.get("n_layers", 4))
+    n_actions = min(4, n)  # Z_a readout on the first 4 qubits, always 4 actions
 
     gates: list[dict] = []
     for layer in range(layers):
@@ -99,7 +100,7 @@ def circuit_spec(config: dict) -> dict:
     return {
         "n_qubits": n,
         "n_layers": layers,
-        "n_actions": n,
+        "n_actions": n_actions,
         "gates": gates,
         "counts": {
             "ry_enc": layers * n,
@@ -111,10 +112,10 @@ def circuit_spec(config: dict) -> dict:
         "n_params": {
             "lam": layers * n,
             "theta": layers * n * 2,
-            "w": n,
-            "b": n,
-            "total": layers * n * 3 + 2 * n,
+            "w": n_actions,
+            "b": n_actions,
+            "total": layers * n * 3 + 2 * n_actions,
         },
         "param_layout": ["lam", "theta", "w", "b"],
-        "readout": [f"Z_{a}" for a in range(n)],
+        "readout": [f"Z_{a}" for a in range(n_actions)],
     }

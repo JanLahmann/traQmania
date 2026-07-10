@@ -35,6 +35,7 @@ from traqmania.env.car import CarPhysics
 from traqmania.env.racing_env import RacingEnv
 from traqmania.server import protocol
 from traqmania.server.runtime import (
+    N_EVOLUTION_STAGES,
     WEIGHTS_DIR,
     available_tracks,
     evolution_stage_specs,
@@ -67,6 +68,15 @@ def keys_to_controls(keys: int) -> tuple[float, float, float]:
     brake = 1.0 if keys & protocol.KEY_BRAKE else 0.0
     throttle = 1.0 if (keys & protocol.KEY_THROTTLE) and not brake else 0.0
     return steer, throttle, brake
+
+
+def quantum_weights_path(track_name: str, n_qubits: int, suffix: str = "") -> Path:
+    """Bundled quantum weights path honoring the n-qubit filename rule:
+    ``quantum_<track><suffix>.npz`` at the default 4 qubits and
+    ``quantum_<track><suffix>_q<n>.npz`` otherwise (``suffix`` carries the
+    ``_warmstart`` / ``_stage<i>`` variants, which follow the same rule)."""
+    qtag = "" if int(n_qubits) == 4 else f"_q{int(n_qubits)}"
+    return WEIGHTS_DIR / f"quantum_{track_name}{suffix}{qtag}.npz"
 
 
 @dataclass
@@ -209,6 +219,7 @@ class DemoSession:
         obs_cfg = config["observation"]
         self.ray_angles = np.deg2rad(np.asarray(obs_cfg["ray_angles_deg"], dtype=np.float64))
         self.ray_max_dist = float(obs_cfg["ray_max_dist"])
+        self.n_qubits = int(config.get("circuit", {}).get("n_qubits", 4))
 
         server_cfg = config["server"]
         hz = 1.0 / self.dt
@@ -287,12 +298,76 @@ class DemoSession:
         else:
             self._error(f"unhandled message: {msg!r}")
 
+    # -------------------------------------------------------- weight resolution
+
+    def _quantum_weights_path(self, suffix: str = "") -> Path:
+        return quantum_weights_path(self.track_name, self.n_qubits, suffix)
+
+    def _load_quantum_qfunc(self, path: Path) -> QuantumQFunction:
+        qfunc = QuantumQFunction(self.config["circuit"])
+        qfunc.set_params(np.load(path)["params"])
+        return qfunc
+
+    def _agent_unavailable(self, kind: str) -> str | None:
+        """Why the bundled ``kind`` weights cannot drive the current track (or None)."""
+        if kind == "quantum":
+            path = self._quantum_weights_path()
+            return None if path.is_file() else f"missing weights '{path.name}'"
+        if self.n_qubits != 4:  # bundled mlp weights expect the 4-feature observation
+            return f"bundled mlp weights use 4 features, config has {self.n_qubits}"
+        path = WEIGHTS_DIR / f"mlp_{self.track_name}.npz"
+        return None if path.is_file() else f"missing weights '{path.name}'"
+
+    def _evolution_stage_specs(self) -> list[tuple[str, Path]]:
+        """:func:`evolution_stage_specs` honoring the n-qubit weight filename rule.
+
+        Returns [] when no suitable q{n} weights exist (evolution unavailable)."""
+        if self.n_qubits == 4:
+            return evolution_stage_specs(self.track_name)
+        specs = [
+            (f"stage {i}", path)
+            for i in range(1, N_EVOLUTION_STAGES + 1)
+            if (path := self._quantum_weights_path(f"_stage{i}")).is_file()
+        ]
+        if specs:
+            return specs
+        pair = [("warm-start", self._quantum_weights_path("_warmstart")),
+                ("trained", self._quantum_weights_path())]
+        return pair * 2 if all(path.is_file() for _, path in pair) else []
+
+    def _weights_unavailable(self, mode: str, opponent: str = "quantum") -> str | None:
+        """Why bundled weights block switching to ``mode`` (None when they don't).
+
+        train mode needs none (a missing warm start falls back to a cold start)."""
+        if mode in ("attract", "hardware"):
+            return self._agent_unavailable("quantum")
+        if mode == "race":
+            return self._agent_unavailable(opponent)
+        if mode == "evolution":
+            specs = self._evolution_stage_specs()
+            if not specs or not all(path.is_file() for _, path in specs):
+                return (f"no evolution stage weights for track '{self.track_name}' "
+                        f"at {self.n_qubits} qubits")
+        return None
+
+    def _try_make_agent_car(self, kind: str) -> _Car | None:
+        """:meth:`_make_agent_car`, degrading to an error + None on missing weights."""
+        reason = self._agent_unavailable(kind)
+        if reason is None:
+            return self._make_agent_car(kind)
+        self._error(f"no '{kind}' agent for track '{self.track_name}': {reason}")
+        return None
+
     # ------------------------------------------------------------ mode switches
 
     def _training_alive(self) -> bool:
         return any(j.thread is not None and j.thread.is_alive() for j in self.jobs.values())
 
     def _set_mode(self, mode: str) -> None:
+        reason = self._weights_unavailable(mode)
+        if reason is not None:  # reject the switch; stay in the previous mode
+            self._error(f"cannot switch to '{mode}' mode: {reason}")
+            return
         if mode != "train":
             self.stop_training()
         if mode != "hardware":
@@ -335,18 +410,23 @@ class DemoSession:
         return True
 
     def _enter_attract(self) -> None:
-        self.cars = [self._make_agent_car("quantum")]
+        car = self._try_make_agent_car("quantum")
+        self.cars = [car] if car is not None else []
 
     def _enter_race(self, opponent: str) -> None:
         x, y, theta = self.track.start_pose()
         human = _Car(id="human", kind="human", state=np.array([x, y, theta, 0.0]))
         self._respawn(human)
-        self.cars = [human, self._make_agent_car(opponent)]
+        agent = self._try_make_agent_car(opponent)
+        self.cars = [human] + ([agent] if agent is not None else [])
 
     def _make_agent_car(self, kind: str) -> _Car:
         key = (kind, self.track_name)
         if key not in self._agent_cache:
-            self._agent_cache[key] = load_agent(kind, self.track_name, config=self.config)
+            if kind == "quantum":
+                self._agent_cache[key] = self._load_quantum_qfunc(self._quantum_weights_path())
+            else:
+                self._agent_cache[key] = load_agent(kind, self.track_name, config=self.config)
         x, y, theta = self.track.start_pose()
         car = _Car(id=kind, kind=kind, state=np.array([x, y, theta, 0.0]),
                    qfunc=self._agent_cache[key])
@@ -355,9 +435,14 @@ class DemoSession:
 
     def _enter_evolution(self) -> None:
         """4 quantum cars driving different training-stage weights, labelled 'ep N'."""
+        reason = self._weights_unavailable("evolution")
+        if reason is not None:
+            self._error(f"cannot enter evolution mode: {reason}")
+            self.cars = []
+            return
         x, y, theta = self.track.start_pose()
         cars = []
-        for i, (label, path) in enumerate(evolution_stage_specs(self.track_name), start=1):
+        for i, (label, path) in enumerate(self._evolution_stage_specs(), start=1):
             key = ("stage", path.name)
             if key not in self._agent_cache:
                 qfunc = QuantumQFunction(self.config["circuit"])
@@ -372,13 +457,18 @@ class DemoSession:
     def _enter_hardware(self) -> None:
         """Current track with one idle fastsim quantum car (drives during replay)."""
         self._hw_replay = None
-        self.cars = [self._make_agent_car("quantum")]
+        car = self._try_make_agent_car("quantum")
+        self.cars = [car] if car is not None else []
         self._outbox.append({"type": "hardware_status", "phase": "idle"})
 
     def _handle_race(self, msg: protocol.Race) -> None:
         if msg.track is not None and not self._set_track(msg.track):
             return
         if msg.action == "start":
+            reason = self._weights_unavailable("race", msg.opponent)
+            if reason is not None:  # reject; stay in the previous mode
+                self._error(f"cannot start race: {reason}")
+                return
             self.stop_training()
             self.mode = "race"
             self._enter_race(msg.opponent)
@@ -407,13 +497,20 @@ class DemoSession:
             self._start_job(agent, warm=msg.warm, episodes=msg.episodes, seed_offset=offset)
 
     def _start_job(self, agent: str, warm: bool, episodes: int | None, seed_offset: int) -> None:
+        warm_path: Path | None = None
+        if warm and agent == "quantum":
+            warm_path = self._quantum_weights_path("_warmstart")
+            if not warm_path.is_file():  # graceful fallback: cold start instead
+                self._error(f"warm-start weights '{warm_path.name}' not found; "
+                            "training quantum from scratch")
+                warm_path, warm = None, False
         tcfg = resolve_training_cfg(self.config, self.track_name, warm)
         episodes = int(episodes) if episodes is not None else int(tcfg["episodes"])
         seed = int(tcfg.get("seed", 0)) + seed_offset
 
         env = RacingEnv(self.track, self.config, n_envs=int(tcfg["n_parallel_envs"]), seed=seed)
-        if warm and agent == "quantum":
-            qfunc: Any = load_agent("quantum", self.track_name, warm=True, config=self.config)
+        if warm_path is not None:
+            qfunc: Any = self._load_quantum_qfunc(warm_path)
         elif agent == "quantum":
             qfunc = QuantumQFunction(self.config["circuit"], seed=seed)
         else:
@@ -534,6 +631,11 @@ class DemoSession:
             return
         if self.hw_job is not None:  # finished but not yet reaped: flush its statuses
             self._tick_hardware()
+        reason = self._weights_unavailable("hardware")
+        if reason is not None:  # reject; stay in the previous mode
+            self._outbox.append({"type": "hardware_status", "phase": "error",
+                                 "message": f"cannot run hardware {msg.action}: {reason}"})
+            return
         try:
             # Must happen on THIS long-lived thread, before any worker thread
             # touches qiskit — see hardware.ensure_qiskit_imported for the
@@ -558,8 +660,10 @@ class DemoSession:
                       else int(hw_cfg.get("spsa_iterations", 30)))
         use_fake = msg.backend == "fake"
         track_name = self.track_name
-        weights_path = WEIGHTS_DIR / f"quantum_{track_name}.npz"
+        weights_path = self._quantum_weights_path()
         max_decisions = msg.max_decisions
+        config = self.config  # bind now: the worker must see THIS session's circuit
+        min_qubits = max(5, self.n_qubits)
 
         job = HardwareJob(kind=msg.action, stop_event=threading.Event())
 
@@ -570,7 +674,7 @@ class DemoSession:
                 job.push("connecting",
                          message="local fake backend" if use_fake
                          else "connecting to IBM Quantum (least busy backend)")
-                backend = hardware.get_backend(use_fake=use_fake)
+                backend = hardware.get_backend(use_fake=use_fake, min_qubits=min_qubits)
                 backend_name = str(getattr(backend, "name", backend))
                 job.push("transpiling", backend_name=backend_name,
                          message=f"transpiling circuit for {backend_name}")
@@ -582,7 +686,7 @@ class DemoSession:
                     job.result = hardware.run_hardware_lap(
                         track_name, weights_path, backend, shots=shots,
                         max_decisions=max_decisions, on_decision=on_decision,
-                        stop_event=job.stop_event)
+                        stop_event=job.stop_event, config=config)
                 else:  # sprint
                     def on_iter(k: int, info: dict) -> None:
                         job.push("running", backend_name=backend_name,
@@ -590,7 +694,8 @@ class DemoSession:
 
                     job.result = hardware.spsa_sprint(
                         track_name, weights_path, backend, iterations=iterations,
-                        shots=shots, on_iter=on_iter, stop_event=job.stop_event)
+                        shots=shots, on_iter=on_iter, stop_event=job.stop_event,
+                        config=config)
             except Exception as exc:  # surfaced as hardware_status error by the reaper
                 job.error = f"{type(exc).__name__}: {exc}"
 

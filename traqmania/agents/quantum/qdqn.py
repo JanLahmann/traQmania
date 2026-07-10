@@ -1,13 +1,15 @@
 """Quantum Q-function on the numpy fast path, implementing the QFunction protocol.
 
-Flat parameter vector layout (total P = L*n + L*n*2 + 2*A):
+Flat parameter vector layout (total P = L*n + L*n*2 + 2*A, A = min(4, n)):
 
     lam   (L, n)     input-scaling params, init pi
     theta (L, n, 2)  variational angles (RY then RZ), init U(-0.1, 0.1)
     w     (A,)       output weights, init 1.0
     b     (A,)       output biases, init 0.0
 
-Q_a = w[a] * <Z_a> + b[a]. numpy/stdlib only — no qiskit imports in this module.
+Q_a = w[a] * <Z_a> + b[a], read out on the first A qubits (there are always 4
+actions; extra qubits at n > 4 only widen the feature register).
+numpy/stdlib only — no qiskit imports in this module.
 """
 
 from __future__ import annotations
@@ -30,7 +32,7 @@ class QuantumQFunction:
         self.seed = int(seed)
 
         self.n_features = self.n_qubits
-        self.n_actions = self.n_qubits  # one Z_a readout per action
+        self.n_actions = min(4, self.n_qubits)  # Z_a readout on the first 4 qubits
 
         self._sim = FastStatevectorSim(n_qubits=self.n_qubits, n_layers=self.n_layers)
 
@@ -51,7 +53,7 @@ class QuantumQFunction:
     def expectations(self, obs: np.ndarray) -> np.ndarray:
         """Raw readout expectations <Z_a> before the output head: (B, F) -> (B, A)."""
         obs = np.asarray(obs, dtype=np.float64)
-        return self._sim.forward(obs, self.lam, self.theta)
+        return self._sim.forward(obs, self.lam, self.theta)[:, : self.n_actions]
 
     def grad_selected(
         self, obs: np.ndarray, action_idx: np.ndarray, upstream: np.ndarray

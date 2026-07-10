@@ -6,11 +6,12 @@ processors (or their local fake twins) via ``qiskit-ibm-runtime``:
 - :func:`get_backend` — a real IBMBackend through ``QiskitRuntimeService`` or a
   local noise-model twin from the fake provider.
 - :class:`HardwareQFunction` — the same ``QFunction`` contract (and the same
-  flat 56-parameter layout ``[lam, theta, w, b]``) as ``QuantumQFunction``,
-  but INFERENCE ONLY: expectation values come from ``EstimatorV2`` PUBs on an
-  ISA-transpiled circuit. Gradients are deliberately not implemented — a
-  param-shift gradient would cost 2 * 48 circuit evaluations per batch, which
-  is why hardware fine-tuning uses SPSA (two evaluations, period).
+  flat ``[lam, theta, w, b]`` layout, 56 parameters at 4 qubits) as
+  ``QuantumQFunction``, but INFERENCE ONLY: expectation values come from
+  ``EstimatorV2`` PUBs on an ISA-transpiled circuit. Gradients are deliberately
+  not implemented — a param-shift gradient would cost 2 circuit evaluations per
+  circuit parameter per batch, which is why hardware fine-tuning uses SPSA
+  (two evaluations, period).
 - :func:`run_hardware_lap` — greedy rollout of one car with every steering
   decision made by the quantum backend, inside a runtime ``Session``.
 - :func:`spsa_sprint` — a short TD-loss fine-tune: replay batch and double-DQN
@@ -37,8 +38,13 @@ from traqmania.agents.training import spsa
 
 WEIGHTS_DIR = Path(__file__).resolve().parent / "weights"
 
-# Known-good small fake backends to fall back through (5 qubits, V2 API).
-_FAKE_FALLBACKS = ("FakeManilaV2", "FakeLimaV2", "FakeBelemV2", "FakeQuitoV2")
+# Known-good small fake backends to fall back through (V2 API), smallest first
+# so a 4-qubit circuit still lands on a 5-qubit device: 5 qubits, then 7, then 16.
+_FAKE_FALLBACKS = (
+    "FakeManilaV2", "FakeLimaV2", "FakeBelemV2", "FakeQuitoV2",  # 5 qubits
+    "FakeLagosV2", "FakeNairobiV2", "FakeJakartaV2",  # 7 qubits
+    "FakeGuadalupeV2",  # 16 qubits
+)
 
 _SERVICE_HELP = (
     "Could not reach IBM Quantum. To run on real hardware:\n"
@@ -77,7 +83,7 @@ def _fake_class_name(fake_name: str) -> str:
     return name if name.endswith("V2") else name + "V2"
 
 
-def _fake_backend(fake_name: str):
+def _fake_backend(fake_name: str, min_qubits: int = 5):
     from qiskit_ibm_runtime import fake_provider
 
     candidates = [_fake_class_name(fake_name)] if fake_name else []
@@ -96,15 +102,15 @@ def _fake_backend(fake_name: str):
             backend = cls()
         except Exception:  # noqa: BLE001 - some snapshots fail to load; keep trying
             continue
-        if getattr(backend, "num_qubits", 0) >= 5:
+        if getattr(backend, "num_qubits", 0) >= min_qubits:
             return backend
     raise RuntimeError(
-        f"no working 5+ qubit FakeBackendV2 found in qiskit_ibm_runtime.fake_provider "
-        f"(tried {tried[:8]}...)"
+        f"no working {min_qubits}+ qubit FakeBackendV2 found in "
+        f"qiskit_ibm_runtime.fake_provider (tried {tried[:8]}...)"
     )
 
 
-def _real_backend(name: str | None):
+def _real_backend(name: str | None, min_qubits: int = 5):
     from qiskit_ibm_runtime import QiskitRuntimeService
 
     token = os.environ.get("QISKIT_IBM_TOKEN")
@@ -115,7 +121,7 @@ def _real_backend(name: str | None):
     try:
         if name:
             return service.backend(name)
-        return service.least_busy(operational=True, simulator=False, min_num_qubits=5)
+        return service.least_busy(operational=True, simulator=False, min_num_qubits=min_qubits)
     except Exception as exc:
         raise RuntimeError(
             f"could not get a backend from IBM Quantum "
@@ -123,18 +129,25 @@ def _real_backend(name: str | None):
         ) from exc
 
 
-def get_backend(name: str | None = None, use_fake: bool = False, fake_name: str = "fake_manila"):
+def get_backend(
+    name: str | None = None,
+    use_fake: bool = False,
+    fake_name: str = "fake_manila",
+    min_qubits: int = 5,
+):
     """A qiskit backend: real via ``QiskitRuntimeService`` or a local fake twin.
 
     ``use_fake=True`` returns a ``FakeBackendV2`` (noise model + coupling map of
-    a retired 5-qubit device, simulated locally — no account needed). Otherwise
-    the runtime service is reached with a token from ``QISKIT_IBM_TOKEN`` or the
+    a retired device, simulated locally — no account needed); the preferred
+    ``fake_name`` is skipped if it has fewer than ``min_qubits`` qubits, falling
+    through to the smallest known-good fake that is big enough. Otherwise the
+    runtime service is reached with a token from ``QISKIT_IBM_TOKEN`` or the
     saved account; ``name`` picks a device, empty means least busy. Raises
     ``RuntimeError`` with setup instructions when the service is unavailable.
     """
     if use_fake:
-        return _fake_backend(fake_name)
-    return _real_backend(name)
+        return _fake_backend(fake_name, min_qubits=min_qubits)
+    return _real_backend(name, min_qubits=min_qubits)
 
 
 def _make_session(backend) -> tuple[Any, str | None]:
@@ -159,8 +172,8 @@ def _make_session(backend) -> tuple[Any, str | None]:
 class HardwareQFunction:
     """Inference-only ``QFunction`` on an IBM (or fake) backend via EstimatorV2.
 
-    Same flat 56-parameter layout as ``QuantumQFunction``:
-    ``[lam (L*n), theta (L*n*2), w (A), b (A)]`` with
+    Same flat parameter layout as ``QuantumQFunction``:
+    ``[lam (L*n), theta (L*n*2), w (A), b (A)]`` with ``A = min(4, n)`` and
     ``Q_a = w[a] * <Z_a> + b[a]``. The circuit is transpiled to ISA form ONCE
     at construction; every ``q_values`` call is a single Estimator job whose
     PUB batches all observation rows (parameter bindings of shape ``(B, ...)``)
@@ -176,7 +189,7 @@ class HardwareQFunction:
         self.shots = int(shots)
 
         self.n_features = self.n_qubits
-        self.n_actions = self.n_qubits  # one Z_a readout per action
+        self.n_actions = min(4, self.n_qubits)  # Z_a readout on the first 4 qubits
 
         # Same initialization (and rng stream) as the numpy fast path.
         rng = np.random.default_rng(self.seed)
@@ -196,7 +209,7 @@ class HardwareQFunction:
         self._isa_circuit = pass_manager.run(qc)
         self._isa_observables = [
             obs.apply_layout(self._isa_circuit.layout)
-            for obs in circuit_mod.observables(self.n_qubits)
+            for obs in circuit_mod.observables(self.n_qubits)[: self.n_actions]
         ]
         self._estimator = EstimatorV2(mode=session if session is not None else backend)
         self._estimator.options.default_shots = self.shots
@@ -271,6 +284,7 @@ def run_hardware_lap(
     max_decisions: int | None = None,
     on_decision: Callable[[int, dict], None] | None = None,
     stop_event: Any = None,
+    config: dict | None = None,
 ) -> dict:
     """Drive ONE car greedily with every decision evaluated on ``backend``.
 
@@ -280,13 +294,16 @@ def run_hardware_lap(
     ``on_decision(i, info)`` fires after each decision with the action taken,
     the Q-values, the car state and per-decision latency. ``stop_event``
     (optional): ``threading.Event``-like; when set, the rollout stops between
-    decisions (cooperative cancellation) and ``aborted`` is True. Returns
-    ``{lapped, best_lap_s, decisions, seconds_per_decision, trajectory,
-    aborted, note}``.
+    decisions (cooperative cancellation) and ``aborted`` is True. ``config``
+    (optional) is the fully-resolved config the weights were trained under
+    (circuit size + observation geometry); defaults to ``load_config()``.
+    Returns ``{lapped, best_lap_s, decisions, seconds_per_decision,
+    trajectory, aborted, note}``.
     """
-    from traqmania.config import load_config
+    if config is None:
+        from traqmania.config import load_config
 
-    config = load_config()
+        config = load_config()
     seed = int(config["training"]["seed"])
     env = _build_env(track_name, config, n_envs=1, seed=seed)
     if max_decisions is None:
@@ -425,6 +442,7 @@ def spsa_sprint(
     on_iter: Callable[[int, dict], None] | None = None,
     step_target: float = 0.01,
     stop_event: Any = None,
+    config: dict | None = None,
 ) -> dict:
     """Short TD-loss SPSA fine-tune of trained weights ON the backend.
 
@@ -445,13 +463,15 @@ def spsa_sprint(
     did to the policy. Note the deliberate asymmetry: the loss is evaluated on
     the NOISY backend while the returns use the exact simulator, so a sprint
     that compensates hardware noise (loss goes down) can trade away fastsim
-    return — the parameters have specialized to the device. Returns
-    ``{loss_history, return_before, return_after, params, iterations,
-    seconds, note}``.
+    return — the parameters have specialized to the device. ``config``
+    (optional) is the fully-resolved config the weights were trained under;
+    defaults to ``load_config()``. Returns ``{loss_history, return_before,
+    return_after, params, iterations, seconds, note}``.
     """
-    from traqmania.config import load_config
+    if config is None:
+        from traqmania.config import load_config
 
-    config = load_config()
+        config = load_config()
     seed = int(config["training"]["seed"])
     params0 = np.load(init_weights_path)["params"]
 
@@ -518,8 +538,9 @@ def spsa_sprint(
 # ------------------------------------------------------------------------ CLI
 
 
-def _default_weights(track: str) -> Path:
-    return WEIGHTS_DIR / f"quantum_{track}.npz"
+def _default_weights(track: str, n_qubits: int = 4) -> Path:
+    suffix = "" if n_qubits == 4 else f"_q{n_qubits}"
+    return WEIGHTS_DIR / f"quantum_{track}{suffix}.npz"
 
 
 def main(argv: list[str] | None = None) -> None:
@@ -534,6 +555,9 @@ def main(argv: list[str] | None = None) -> None:
     ):
         p = sub.add_parser(name, help=help_text)
         p.add_argument("--track", default="oval", help="track name (oval | chicane | gp)")
+        p.add_argument("--profile", default=None,
+                       help="config profile overlay (e.g. q6; picks circuit size, "
+                            "observation geometry and the default weights file)")
         p.add_argument("--fake", action="store_true", help="use a local fake backend")
         p.add_argument("--fake-name", default="fake_manila", help="fake backend to prefer")
         p.add_argument("--backend", default=None, help="real backend name (default: least busy)")
@@ -547,8 +571,15 @@ def main(argv: list[str] | None = None) -> None:
             p.add_argument("--batch", type=int, default=16, help="replay batch size")
     args = parser.parse_args(argv)
 
-    weights = Path(args.weights) if args.weights else _default_weights(args.track)
-    backend = get_backend(args.backend, use_fake=args.fake, fake_name=args.fake_name)
+    from traqmania.config import load_config
+
+    config = load_config(args.profile)
+    n_qubits = int(config["circuit"]["n_qubits"])
+    weights = Path(args.weights) if args.weights else _default_weights(args.track, n_qubits)
+    if not weights.exists():
+        parser.error(f"weights file not found: {weights} (train first or pass --weights)")
+    backend = get_backend(args.backend, use_fake=args.fake, fake_name=args.fake_name,
+                          min_qubits=max(5, n_qubits))
     print(f"backend: {getattr(backend, 'name', backend)}"
           f"{' (fake, local simulation)' if args.fake else ''}")
     print(f"weights: {weights}")
@@ -560,7 +591,8 @@ def main(argv: list[str] | None = None) -> None:
                   f"lap={info['lap']}  {info['seconds']:.2f}s")
 
         result = run_hardware_lap(args.track, weights, backend, shots=args.shots,
-                                  max_decisions=args.max_decisions, on_decision=on_decision)
+                                  max_decisions=args.max_decisions, on_decision=on_decision,
+                                  config=config)
         if result["note"]:
             print(f"note: {result['note']}")
         lap_txt = f"{result['best_lap_s']:.2f}s" if result["lapped"] else "no (rollout ended)"
@@ -573,7 +605,8 @@ def main(argv: list[str] | None = None) -> None:
                   f"(f+={info['f_plus']:.4f} f-={info['f_minus']:.4f})")
 
         result = spsa_sprint(args.track, weights, backend, iterations=args.iterations,
-                             shots=args.shots, batch=args.batch, on_iter=on_iter)
+                             shots=args.shots, batch=args.batch, on_iter=on_iter,
+                             config=config)
         if result["note"]:
             print(f"note: {result['note']}")
         print(f"\nSPSA sprint done in {result['seconds']:.1f}s "

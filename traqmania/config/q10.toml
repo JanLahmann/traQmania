@@ -1,0 +1,9 @@
+# 10-qubit profile: 9 lidar rays + speed = 10 features, one per qubit.
+# UNTRAINED OPTION: no quantum_<track>_q10.npz weights are bundled; train first
+# (attract/race/evolution/hardware stay unavailable until weights exist).
+
+[circuit]
+n_qubits = 10
+
+[observation]
+ray_angles_deg = [-60.0, -45.0, -30.0, -15.0, 0.0, 15.0, 30.0, 45.0, 60.0]

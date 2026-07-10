@@ -111,6 +111,22 @@ function applyTrack(payload) {
   if (sel.value !== payload.name) sel.value = payload.name;
 }
 
+// Non-default circuit sizes (q6/q8/q10 profiles): fix up the 4-qubit copy in
+// the captions, the readout hint and the Explain panel. At the default
+// 4 qubits everything stays exactly as authored.
+function applyCircuitSize(spec) {
+  attract.setCircuitSpec(spec);
+  const n = spec.n_qubits;
+  if (!n || n === 4) return;
+  const hint = $("#qubit-hint");
+  if (hint) {
+    hint.innerHTML =
+      `Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the first 4 of ${n} qubits` +
+      " — one per action.";
+  }
+  initExplain($("#panel-explain"), spec);
+}
+
 // -- lap board ---------------------------------------------------------------
 
 let lapboardAt = 0;
@@ -223,6 +239,7 @@ net.on("welcome", (msg) => {
   );
   if (msg.circuit_spec) {
     renderCircuit(msg.circuit_spec, $("#circuit-diagram"), $("#circuit-legend"));
+    applyCircuitSize(msg.circuit_spec);
   }
   if (msg.ui) {
     attract.setIdleSeconds(msg.ui.attract_idle_seconds || 45);

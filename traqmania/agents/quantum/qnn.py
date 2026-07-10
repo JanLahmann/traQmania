@@ -71,7 +71,7 @@ class QiskitQFunction:
         self.shots = int(shots)
 
         self.n_features = self.n_qubits
-        self.n_actions = self.n_qubits  # one Z_a readout per action
+        self.n_actions = min(4, self.n_qubits)  # Z_a readout on the first 4 qubits
 
         # Same initialization (and rng stream) as the numpy fast path.
         rng = np.random.default_rng(self.seed)
@@ -91,7 +91,7 @@ class QiskitQFunction:
 
         qc = circuit_mod.build_circuit(self.n_qubits, self.n_layers)
         input_params, weight_params = circuit_mod.split_parameters(qc)
-        obs = circuit_mod.observables(self.n_qubits)
+        obs = circuit_mod.observables(self.n_qubits)[: self.n_actions]
 
         backend_options: dict = {"seed_simulator": self.seed}
         pass_manager = None

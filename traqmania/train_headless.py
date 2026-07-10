@@ -86,10 +86,16 @@ def config_hash(config: dict) -> str:
 
 def save_weights(qfunc, agent: str, track_name: str, config: dict, episodes: int,
                  out_dir: Path | None = None) -> Path:
-    """Write ``<agent>_<track>.npz`` (params) + ``.meta.json`` sidecar; returns npz path."""
+    """Write ``<agent>_<track>.npz`` (params) + ``.meta.json`` sidecar; returns npz path.
+
+    Non-default circuit sizes get a ``_q<n>`` filename tag (both agents, so a
+    q6/q8/q10 training run never clobbers the bundled 4-feature weights).
+    """
     out_dir = Path(out_dir) if out_dir is not None else WEIGHTS_DIR
     out_dir.mkdir(parents=True, exist_ok=True)
-    npz_path = out_dir / f"{agent}_{track_name}.npz"
+    n_qubits = int(config.get("circuit", {}).get("n_qubits", 4))
+    qtag = "" if n_qubits == 4 else f"_q{n_qubits}"
+    npz_path = out_dir / f"{agent}_{track_name}{qtag}.npz"
     np.savez(npz_path, params=qfunc.get_params())
     meta = {
         "agent": agent,

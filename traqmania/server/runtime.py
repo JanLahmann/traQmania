@@ -33,19 +33,24 @@ def load_agent(kind: str, track_name: str, warm: bool = False, config: dict | No
     """Build a Q-function of ``kind`` ('quantum' | 'mlp') with bundled weights loaded.
 
     ``warm=True`` (quantum only) loads ``quantum_<track>_warmstart.npz`` instead of
-    the fully-trained weights.
+    the fully-trained weights.  Quantum weight filenames gain a ``_q<n>`` tag when
+    ``config`` sets ``circuit.n_qubits`` to anything other than the default 4.
     """
     if config is None:
         config = load_config()
     if kind == "mlp":
         qfunc: Any = MLPQFunction(n_features=4, n_actions=N_ACTIONS)
+        path = WEIGHTS_DIR / f"mlp_{track_name}.npz"
     elif kind == "quantum":
         qfunc = QuantumQFunction(config["circuit"])
+        # n-qubit filename rule: no tag at the default 4 qubits, _q<n> otherwise.
+        n_qubits = int(config.get("circuit", {}).get("n_qubits", 4))
+        qtag = "" if n_qubits == 4 else f"_q{n_qubits}"
+        suffix = "_warmstart" if warm else ""
+        path = WEIGHTS_DIR / f"quantum_{track_name}{suffix}{qtag}.npz"
     else:
         raise ValueError(f"unknown agent kind '{kind}' (expected 'quantum' or 'mlp')")
 
-    suffix = "_warmstart" if (warm and kind == "quantum") else ""
-    path = WEIGHTS_DIR / f"{kind}_{track_name}{suffix}.npz"
     qfunc.set_params(np.load(path)["params"])
     return qfunc
 

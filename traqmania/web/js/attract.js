@@ -1,6 +1,8 @@
 // Attract-mode caption rotation + client-side idle timer that returns the
 // exhibit to attract mode after `ui.attract_idle_seconds` without interaction.
 
+// Rewritten by setCircuitSpec() for non-default circuit sizes: indexes 0, 1,
+// 3 and 7 carry qubit / parameter / ray counts.
 const CAPTIONS = [
   "A 4-qubit quantum circuit is driving this car.",
   "56 trainable parameters — a comparably tiny neural net drives the green car.",
@@ -35,6 +37,23 @@ export class AttractManager {
   setIdleSeconds(s) {
     this.idleSeconds = s;
     this._armIdle();
+  }
+
+  /** Rewrite the circuit-size captions from the welcome `circuit_spec`.
+   *  No-op at the default 4 qubits, so the stock copy stays untouched. */
+  setCircuitSpec(spec) {
+    const n = spec && spec.n_qubits;
+    if (!n || n === 4) return;
+    CAPTIONS[0] = `A ${n}-qubit quantum circuit is driving this car.`;
+    const total = spec.n_params && spec.n_params.total;
+    if (total) {
+      CAPTIONS[1] =
+        `${total} trainable parameters — a comparably tiny neural net drives the green car.`;
+    }
+    CAPTIONS[3] =
+      "The first four qubits are the actions: each ⟨Z⟩ expectation value becomes a Q-value.";
+    const words = { 5: "Five", 7: "Seven", 9: "Nine" };
+    CAPTIONS[7] = `${words[n - 1] || n - 1} lidar rays and speed — that's all the car can sense.`;
   }
 
   setMode(mode) {

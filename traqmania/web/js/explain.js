@@ -1,14 +1,19 @@
 // Static explainer content for the Explain panel: sub-tabs with concise,
-// accurate copy about the exhibit.
+// accurate copy about the exhibit. The copy is templated on the circuit spec
+// (welcome.circuit_spec) so q6/q8/q10 profiles state the right sizes; the
+// defaults reproduce the 4-qubit text verbatim.
 
-const SECTIONS = [
+const RAY_WORDS = { 3: "three", 5: "five", 7: "seven", 9: "nine" };
+
+const sections = ({ n_qubits: n = 4, n_layers: layers = 4, n_params: np = {} } = {}) => [
   {
     id: "what",
     title: "What is this?",
     html: `
       <p><strong>traQmania</strong> is a racing game where the driver is a
-      <em>quantum circuit</em>. A tiny 4-qubit parameterized circuit reads the
-      car's sensors — three lidar rays, speed and heading — and its measurement
+      <em>quantum circuit</em>. A tiny ${n}-qubit parameterized circuit reads the
+      car's sensors — ${RAY_WORDS[n - 1] || n - 1} lidar rays, speed and heading —
+      and its measurement
       results decide whether to steer left, go straight, steer right, or
       brake.</p>
       <p>A classical neural network (MLP) of similar size trains on exactly the
@@ -37,7 +42,7 @@ const SECTIONS = [
     title: "The quantum circuit",
     html: `
       <p>The Q-function of the quantum agent is a
-      <strong>variational quantum circuit</strong> with 4 qubits and 4 layers.
+      <strong>variational quantum circuit</strong> with ${n} qubits and ${layers} layers.
       Each layer first <em>encodes</em> the observation with RY(λ·x) rotations,
       then applies trainable RY/RZ rotations, then entangles neighbouring
       qubits with a ring of CZ gates.</p>
@@ -45,7 +50,8 @@ const SECTIONS = [
       <strong>data re-uploading</strong> — it lets even a small circuit
       represent rich, non-linear functions of the input.</p>
       <p>The output is read as the <strong>⟨Z⟩ expectation value</strong> of
-      each qubit: four numbers in [-1, 1], scaled to become the four Q-values.
+      ${n === 4 ? "each qubit" : "each of the first four qubits"}: four numbers
+      in [-1, 1], scaled to become the four Q-values.
       The gauges in the Quantum tab show them live.</p>`,
   },
   {
@@ -55,7 +61,8 @@ const SECTIONS = [
       <p>The classical baseline is a small <strong>MLP</strong> (multi-layer
       perceptron) trained with the same double DQN algorithm, the same rewards
       and the same observations. The quantum circuit has only about
-      <strong>56 trainable parameters</strong>; the MLP is kept comparably
+      <strong>${np.total ?? 3 * layers * n + 8} trainable parameters</strong>;
+      the MLP is kept comparably
       small.</p>
       <p>To be honest: on a toy task like this the quantum agent has
       <em>no proven advantage</em> — whether quantum models can beat classical
@@ -91,8 +98,10 @@ const SECTIONS = [
   },
 ];
 
-/** Build the explain panel (sub-tab nav + sections) inside `root`. */
-export function initExplain(root) {
+/** Build the explain panel (sub-tab nav + sections) inside `root`.
+ *  `spec` is the welcome `circuit_spec` (optional: defaults to 4 qubits). */
+export function initExplain(root, spec) {
+  const SECTIONS = sections(spec);
   const nav = document.createElement("nav");
   nav.className = "explain-nav";
   const body = document.createElement("div");

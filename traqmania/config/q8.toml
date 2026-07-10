@@ -1,0 +1,9 @@
+# 8-qubit profile: 7 lidar rays + speed = 8 features, one per qubit.
+# UNTRAINED OPTION: no quantum_<track>_q8.npz weights are bundled; train first
+# (attract/race/evolution/hardware stay unavailable until weights exist).
+
+[circuit]
+n_qubits = 8
+
+[observation]
+ray_angles_deg = [-60.0, -40.0, -20.0, 0.0, 20.0, 40.0, 60.0]

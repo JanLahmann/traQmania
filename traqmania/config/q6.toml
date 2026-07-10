@@ -1,0 +1,8 @@
+# 6-qubit profile: 5 lidar rays + speed = 6 features, one per qubit.
+# Bundled weights follow the quantum_<track>_q6.npz filename rule.
+
+[circuit]
+n_qubits = 6
+
+[observation]
+ray_angles_deg = [-60.0, -30.0, 0.0, 30.0, 60.0]

@@ -1,21 +1,31 @@
-// Live quantum readout panel: 4 <Z_a> gauges in [-1, 1] plus a Q-value bar
-// chart with argmax highlight. UI updates throttled to <= 15 fps.
+// Live quantum readout panel: one <Z_a> gauge per readout expectation in
+// [-1, 1] plus a Q-value bar chart with argmax highlight. Gauge/bar counts
+// follow the incoming `quantum` messages. UI updates throttled to <= 15 fps.
 
 export const ACTION_LABELS = ["Left", "Straight", "Right", "Brake"];
 
 const UPDATE_MS = 67; // ~15 fps
+const DEFAULT_COUNT = 4; // shown until the first quantum message arrives
 
 export class QuantumPanel {
   constructor({ gaugesEl, barsEl, actionEl }) {
+    this.gaugesEl = gaugesEl;
+    this.barsEl = barsEl;
     this.actionEl = actionEl;
     this.pending = null;
     this.gauges = [];
     this.bars = [];
 
-    gaugesEl.replaceChildren();
-    barsEl.replaceChildren();
+    this._buildGauges(DEFAULT_COUNT);
+    this._buildBars(DEFAULT_COUNT);
 
-    for (let i = 0; i < 4; i++) {
+    setInterval(() => this._apply(), UPDATE_MS);
+  }
+
+  _buildGauges(n) {
+    this.gaugesEl.replaceChildren();
+    this.gauges = [];
+    for (let i = 0; i < n; i++) {
       const row = document.createElement("div");
       row.className = "qgauge";
       const label = document.createElement("span");
@@ -32,11 +42,15 @@ export class QuantumPanel {
       value.className = "qgauge-value";
       value.textContent = "0.00";
       row.append(label, track, value);
-      gaugesEl.append(row);
+      this.gaugesEl.append(row);
       this.gauges.push({ needle, value });
     }
+  }
 
-    for (let i = 0; i < 4; i++) {
+  _buildBars(n) {
+    this.barsEl.replaceChildren();
+    this.bars = [];
+    for (let i = 0; i < n; i++) {
       const col = document.createElement("div");
       col.className = "qbar-col";
       const stack = document.createElement("div");
@@ -49,13 +63,11 @@ export class QuantumPanel {
       val.textContent = "—";
       const label = document.createElement("span");
       label.className = "qbar-label";
-      label.textContent = ACTION_LABELS[i];
+      label.textContent = ACTION_LABELS[i] ?? `A${i}`;
       col.append(val, stack, label);
-      barsEl.append(col);
+      this.barsEl.append(col);
       this.bars.push({ col, bar, val });
     }
-
-    setInterval(() => this._apply(), UPDATE_MS);
   }
 
   /** Feed a `quantum` protocol message; applied on the next UI tick. */
@@ -69,6 +81,7 @@ export class QuantumPanel {
     this.pending = null;
 
     const exps = msg.expectations || [];
+    if (exps.length && exps.length !== this.gauges.length) this._buildGauges(exps.length);
     for (let i = 0; i < this.gauges.length; i++) {
       const v = Math.max(-1, Math.min(1, exps[i] ?? 0));
       this.gauges[i].needle.style.left = `${((v + 1) / 2) * 100}%`;
@@ -77,6 +90,7 @@ export class QuantumPanel {
 
     const qs = msg.q_values || [];
     if (qs.length) {
+      if (qs.length !== this.bars.length) this._buildBars(qs.length);
       const min = Math.min(...qs);
       const max = Math.max(...qs);
       const span = max - min + 1e-9; // normalize so within-update differences are visible
