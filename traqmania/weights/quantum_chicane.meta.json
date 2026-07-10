@@ -1,7 +1,10 @@
 {
   "agent": "quantum",
   "track": "chicane",
-  "config_hash": "87392ee02736",
-  "episodes": 3000,
-  "date": "DATE"
+  "source": "snap_chicane_s2.npz",
+  "selection": "greedy-eval 6 episodes",
+  "greedy_laps": 6,
+  "greedy_best_lap_s": 13.7,
+  "trainer": "best-snapshot",
+  "date": "2026-07-10"
 }

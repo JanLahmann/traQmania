@@ -15,7 +15,7 @@ from fastapi.staticfiles import StaticFiles
 from traqmania.server.session import DemoSession
 from traqmania.server.ws import Hub, handle_socket
 
-WEB_DIR = Path(__file__).resolve().parent.parent.parent / "web"
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 
 def create_app(config: dict[str, Any]) -> FastAPI:

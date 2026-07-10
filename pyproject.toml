@@ -31,7 +31,10 @@ traqmania = "traqmania.__main__:main"
 include = ["traqmania*"]
 
 [tool.setuptools.package-data]
-traqmania = ["config/*.toml", "env/tracks/*.json", "weights/*.npz", "weights/*.json"]
+traqmania = [
+    "config/*.toml", "env/tracks/*.json", "weights/*.npz", "weights/*.json",
+    "web/*.html", "web/css/*.css", "web/js/*.js",
+]
 
 [tool.ruff]
 line-length = 100
