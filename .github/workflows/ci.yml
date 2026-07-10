@@ -1,0 +1,51 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ["3.11", "3.12"]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: ${{ matrix.python-version }}
+          cache: pip
+      - name: Install
+        run: pip install -e ".[dev]"
+      - name: Lint
+        run: ruff check .
+      - name: Test
+        run: pytest
+
+  notebooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install
+        run: pip install -e ".[notebooks,hardware]"
+      - name: Execute notebooks 01-04
+        run: |
+          jupyter nbconvert --to notebook --execute --output-dir /tmp/nb-out \
+            --ExecutePreprocessor.timeout=900 \
+            notebooks/01_the_racing_env.ipynb \
+            notebooks/02_q_learning_from_scratch.ipynb \
+            notebooks/03_quantum_circuits_as_q_functions.ipynb \
+            notebooks/04_training_the_quantum_driver.ipynb
+      - name: Execute notebook 05 (hardware cells no-op)
+        env:
+          TRAQMANIA_SKIP_HW: "1"
+        run: |
+          jupyter nbconvert --to notebook --execute --output-dir /tmp/nb-out \
+            --ExecutePreprocessor.timeout=900 \
+            notebooks/05_real_quantum_hardware.ipynb

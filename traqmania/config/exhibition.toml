@@ -1,0 +1,8 @@
+# Exhibition/kiosk profile: attract mode on, quick idle return, bind all interfaces.
+
+[server]
+host = "0.0.0.0"
+
+[ui]
+attract_idle_seconds = 20
+kiosk = true

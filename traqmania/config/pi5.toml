@@ -1,0 +1,9 @@
+# Raspberry Pi 5 profile: lighter broadcast + smaller batches, warm-start by default.
+
+[training]
+batch_size = 16
+warm_start = true
+
+[server]
+broadcast_hz = 15
+telemetry_hz = 5

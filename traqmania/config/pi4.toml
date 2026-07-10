@@ -1,0 +1,10 @@
+# Raspberry Pi 4 profile: warm-start-only live training, minimal telemetry.
+
+[training]
+batch_size = 8
+episodes = 150
+warm_start = true
+
+[server]
+broadcast_hz = 15
+telemetry_hz = 5

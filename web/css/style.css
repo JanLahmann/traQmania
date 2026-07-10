@@ -1,0 +1,592 @@
+/* traQmania — dark exhibit UI. No external assets. */
+
+:root {
+  --bg: #0f1117;
+  --bg-panel: #161a22;
+  --bg-inset: #11141b;
+  --border: #262b36;
+  --text: #e6e9ef;
+  --muted: #8a91a0;
+  --accent: #0f62fe;
+  --quantum: #7a5cff;
+  --mlp: #2fbf71;
+  --human: #ff9f1c;
+  --danger: #e5484d;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+  margin: 0;
+}
+
+body {
+  display: grid;
+  grid-template-rows: auto 1fr auto;
+  background: var(--bg);
+  color: var(--text);
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue",
+    Arial, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+}
+
+h2 {
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--muted);
+  margin: 18px 0 8px;
+}
+
+.hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 4px 0 10px;
+}
+
+button {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 14px;
+  cursor: pointer;
+}
+
+button:hover {
+  border-color: #3a4152;
+}
+
+button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
+button.active {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+.accent-btn {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+select,
+input[type="number"] {
+  font: inherit;
+  color: var(--text);
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 5px 8px;
+}
+
+/* -- top bar --------------------------------------------------------------- */
+
+#topbar {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  padding: 10px 16px;
+  border-bottom: 1px solid var(--border);
+  background: var(--bg-panel);
+}
+
+.brand {
+  font-size: 18px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.brand-q {
+  color: var(--quantum);
+}
+
+.modes {
+  display: flex;
+  gap: 6px;
+}
+
+.track-picker,
+#race-controls label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--muted);
+}
+
+#race-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.spacer {
+  flex: 1;
+}
+
+.pill {
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+  border: 1px solid var(--border);
+}
+
+.pill-ok {
+  color: var(--mlp);
+  border-color: rgba(47, 191, 113, 0.5);
+}
+
+.pill-off {
+  color: var(--human);
+  border-color: rgba(255, 159, 28, 0.5);
+}
+
+/* -- layout ----------------------------------------------------------------- */
+
+#layout {
+  display: grid;
+  grid-template-columns: 1fr 380px;
+  min-height: 0;
+}
+
+#stage {
+  position: relative;
+  min-width: 0;
+  min-height: 0;
+}
+
+#race-canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  display: block;
+}
+
+#toast {
+  position: absolute;
+  top: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-panel);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 8px 16px;
+  z-index: 5;
+}
+
+#toast.toast-error {
+  border-color: var(--danger);
+  color: var(--danger);
+}
+
+/* -- sidebar ----------------------------------------------------------------- */
+
+#sidebar {
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--border);
+  background: var(--bg-panel);
+  min-height: 0;
+}
+
+.tabs {
+  display: flex;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab-btn {
+  flex: 1;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  padding: 10px 0;
+  color: var(--muted);
+  border-bottom: 2px solid transparent;
+}
+
+.tab-btn.active {
+  color: var(--text);
+  background: transparent;
+  border-bottom-color: var(--quantum);
+}
+
+.panel {
+  display: none;
+  padding: 4px 16px 20px;
+  overflow-y: auto;
+  min-height: 0;
+}
+
+.panel.active {
+  display: block;
+}
+
+/* -- quantum panel ----------------------------------------------------------- */
+
+.qgauge {
+  display: grid;
+  grid-template-columns: 26px 1fr 44px;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.qgauge-label {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.qgauge-track {
+  position: relative;
+  height: 10px;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+}
+
+.qgauge-zero {
+  position: absolute;
+  left: 50%;
+  top: -2px;
+  bottom: -2px;
+  width: 1px;
+  background: #3a4152;
+}
+
+.qgauge-needle {
+  position: absolute;
+  left: 50%;
+  top: -4px;
+  width: 3px;
+  height: 16px;
+  margin-left: -1.5px;
+  border-radius: 2px;
+  background: var(--quantum);
+  transition: left 80ms linear;
+}
+
+.qgauge-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  font-size: 12px;
+}
+
+#qbars {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 10px;
+  height: 120px;
+  align-items: end;
+}
+
+.qbar-col {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  height: 100%;
+  gap: 4px;
+}
+
+.qbar-stack {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 5px;
+  overflow: hidden;
+}
+
+.qbar {
+  width: 100%;
+  height: 8%;
+  background: #3d4356;
+  transition: height 80ms linear;
+}
+
+.qbar-col.argmax .qbar {
+  background: var(--quantum);
+}
+
+.qbar-col.argmax .qbar-label {
+  color: var(--quantum);
+  font-weight: 600;
+}
+
+.qbar-value {
+  font-size: 11px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.qbar-label {
+  font-size: 11px;
+  color: var(--muted);
+}
+
+.qaction {
+  margin-top: 8px;
+  text-align: center;
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--quantum);
+}
+
+.circuit-scroll {
+  overflow-x: auto;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 6px;
+}
+
+.circuit-legend {
+  list-style: none;
+  padding: 0;
+  margin: 10px 0 0;
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.circuit-legend li {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  margin: 4px 0;
+}
+
+.lg {
+  flex: 0 0 auto;
+  width: 12px;
+  height: 12px;
+  border-radius: 3px;
+  transform: translateY(2px);
+}
+
+.lg-enc {
+  background: #3b2d73;
+  border: 1px solid var(--quantum);
+}
+
+.lg-var {
+  background: #232836;
+  border: 1px solid #4a5268;
+}
+
+.lg-cz {
+  background: #8fa0c9;
+  border-radius: 50%;
+}
+
+.lg-meas {
+  background: #1e3a2f;
+  border: 1px solid var(--mlp);
+}
+
+/* -- training panel ---------------------------------------------------------- */
+
+#train-form {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+#train-form label {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--muted);
+}
+
+#train-form label.check {
+  justify-content: flex-start;
+}
+
+#train-form input[type="number"] {
+  width: 90px;
+}
+
+.btn-row {
+  display: flex;
+  gap: 8px;
+}
+
+#training-chart {
+  width: 100%;
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+}
+
+.stat-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.stat-row b {
+  color: var(--text);
+}
+
+/* -- explain panel ------------------------------------------------------------ */
+
+.explain-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 12px 0;
+}
+
+.explain-nav button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.explain-nav button.active {
+  background: var(--quantum);
+  border-color: var(--quantum);
+  color: #fff;
+}
+
+.explain-body {
+  line-height: 1.55;
+  font-size: 13.5px;
+}
+
+.explain-body h2 {
+  margin-top: 6px;
+}
+
+.explain-body em {
+  color: var(--quantum);
+  font-style: normal;
+}
+
+/* -- bottom bar ---------------------------------------------------------------- */
+
+#bottombar {
+  display: flex;
+  align-items: center;
+  gap: 20px;
+  padding: 8px 16px;
+  border-top: 1px solid var(--border);
+  background: var(--bg-panel);
+  min-height: 44px;
+}
+
+#lapboard {
+  display: flex;
+  gap: 24px;
+  flex-wrap: wrap;
+}
+
+.lap-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  font-variant-numeric: tabular-nums;
+}
+
+.lap-row.off {
+  opacity: 0.55;
+}
+
+.lap-row b {
+  font-weight: 600;
+}
+
+.lap-kind {
+  min-width: 58px;
+  font-weight: 600;
+}
+
+.lap-cell {
+  color: var(--muted);
+}
+
+.lap-cell b {
+  color: var(--text);
+}
+
+.dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex: 0 0 auto;
+}
+
+.caption {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 14px;
+  font-style: italic;
+}
+
+.caption-in {
+  animation: caption-fade 700ms ease-out;
+}
+
+@keyframes caption-fade {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* -- kiosk mode ------------------------------------------------------------------ */
+
+body.kiosk {
+  font-size: 16px;
+  cursor: none;
+}
+
+body.kiosk button,
+body.kiosk select {
+  cursor: none;
+}
+
+body.kiosk .caption {
+  font-size: 18px;
+}
+
+/* -- small screens ---------------------------------------------------------------- */
+
+@media (max-width: 900px) {
+  #layout {
+    grid-template-columns: 1fr;
+    grid-template-rows: 55% 45%;
+  }
+
+  #sidebar {
+    border-left: none;
+    border-top: 1px solid var(--border);
+  }
+
+  body {
+    overflow: auto;
+  }
+}

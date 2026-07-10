@@ -1,0 +1,7 @@
+{
+  "agent": "mlp",
+  "track": "oval",
+  "config_hash": "4e85615b859c",
+  "episodes": 400,
+  "date": "DATE"
+}

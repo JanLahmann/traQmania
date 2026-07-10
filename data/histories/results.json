@@ -1,0 +1,104 @@
+{
+  "gp_a_longslow": {
+    "clean_episode": 779,
+    "clean_wall_s": 31.7,
+    "final_return": 473.9,
+    "rc": 0
+  },
+  "gp_b_slower": {
+    "clean_episode": 1427,
+    "clean_wall_s": 66.2,
+    "final_return": 275.7,
+    "rc": 0
+  },
+  "gp_c_lowlr": {
+    "clean_episode": 797,
+    "clean_wall_s": 32.0,
+    "final_return": 305.5,
+    "rc": 0
+  },
+  "gp_d_gamma99": {
+    "clean_episode": 686,
+    "clean_wall_s": 32.1,
+    "final_return": 232.8,
+    "rc": 0
+  },
+  "gp_e_lowend": {
+    "clean_episode": 901,
+    "clean_wall_s": 45.7,
+    "final_return": 265.3,
+    "rc": 0
+  },
+  "gp_f_dense": {
+    "clean_episode": 1019,
+    "clean_wall_s": 45.9,
+    "final_return": 252.9,
+    "rc": 0
+  },
+  "gp_g_bigbatch": {
+    "clean_episode": 830,
+    "clean_wall_s": 54.3,
+    "final_return": 261.1,
+    "rc": 0
+  },
+  "gp_h_moreenvs": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 146.4,
+    "rc": 0
+  },
+  "gp_i_combo": {
+    "clean_episode": 860,
+    "clean_wall_s": 37.6,
+    "final_return": 197.7,
+    "rc": 0
+  },
+  "rob_quantum_oval_s0": {
+    "clean_episode": 203,
+    "clean_wall_s": 6.5,
+    "final_return": 687.6,
+    "rc": 0
+  },
+  "rob_quantum_oval_s1": {
+    "clean_episode": 223,
+    "clean_wall_s": 9.7,
+    "final_return": 1041.2,
+    "rc": 0
+  },
+  "rob_quantum_oval_s2": {
+    "clean_episode": 279,
+    "clean_wall_s": 13.9,
+    "final_return": 1276.9,
+    "rc": 0
+  },
+  "rob_quantum_oval_s3": {
+    "clean_episode": 210,
+    "clean_wall_s": 6.8,
+    "final_return": 907.7,
+    "rc": 0
+  },
+  "rob_quantum_oval_s4": {
+    "clean_episode": 208,
+    "clean_wall_s": 6.4,
+    "final_return": 997.8,
+    "rc": 0
+  },
+  "rob_quantum_chicane_s0": {
+    "clean_episode": 288,
+    "clean_wall_s": 12.3,
+    "final_return": 442.7,
+    "rc": 0
+  },
+  "rob_quantum_chicane_s1": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 90.2,
+    "rc": 0
+  },
+  "rob_quantum_chicane_s2": {
+    "clean_episode": 318,
+    "clean_wall_s": 13.9,
+    "final_return": 1249.2,
+    "rc": 0
+  }
+}

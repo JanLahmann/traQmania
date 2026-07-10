@@ -1,0 +1,84 @@
+# traQmania default configuration.
+# Profiles (pi4.toml, pi5.toml, exhibition.toml) overlay onto this file.
+
+[physics]
+dt = 0.016666667          # 60 Hz substep
+substeps_per_decision = 6 # -> 10 Hz agent decisions, action held between decisions
+accel = 9.0               # units/s^2 at full throttle
+brake = 14.0
+drag = 0.35
+v_max = 22.0
+v_turn = 9.0              # speed of peak steering authority
+k_steer = 2.6             # rad/s steering rate at peak authority
+
+[observation]
+ray_angles_deg = [-60.0, 0.0, 60.0]
+ray_max_dist = 30.0       # normalization length for lidar rays
+
+[reward]
+progress_scale = 1.0      # reward per unit of centerline arc-length gained
+offtrack_penalty = 10.0
+lap_bonus = 50.0
+checkpoint_bonus = 5.0
+max_decisions = 600       # episode cap (60 s at 10 Hz)
+
+[track]
+default = "oval"
+resample_spacing = 1.5
+
+[circuit]
+n_qubits = 4
+n_layers = 4              # data re-uploading blocks
+seed = 7
+
+[training]
+algo = "double_dqn"
+backend = "fastsim"       # fastsim | aer_statevector | aer_shots | aer_noisy
+episodes = 400
+replay_size = 10000
+batch_size = 32
+gamma = 0.98
+lr = 0.01
+target_sync_every = 200   # updates
+epsilon_start = 1.0
+epsilon_end = 0.05
+epsilon_decay_episodes = 250
+n_parallel_envs = 8
+seed = 42
+warm_start = false
+
+# Per-track overrides merged onto [training] by the server (see server/runtime.py).
+# oval/chicane train fine with the base settings and need no preset.
+[training_presets.gp]
+episodes = 2000
+epsilon_decay_episodes = 1200
+gamma = 0.99
+
+# Warm-start recipe: short fine-tune on top of bundled warm-start weights.
+[training_warm]
+epsilon_start = 0.25
+epsilon_end = 0.05
+epsilon_decay_episodes = 40
+episodes = 150
+
+# gp needs a longer warm fine-tune (merged on top of [training_warm]).
+[training_warm_gp]
+epsilon_start = 0.35
+epsilon_decay_episodes = 150
+episodes = 500
+gamma = 0.99
+
+[server]
+host = "127.0.0.1"
+port = 8000
+broadcast_hz = 20
+telemetry_hz = 10
+
+[ui]
+attract_idle_seconds = 45
+kiosk = false
+
+[hardware]
+backend_name = ""          # empty -> least busy available
+shots = 1024
+spsa_iterations = 30

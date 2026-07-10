@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>traQmania — quantum racing</title>
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <header id="topbar">
+    <div class="brand">tra<span class="brand-q">Q</span>mania</div>
+
+    <nav class="modes" id="mode-buttons" aria-label="Mode">
+      <button data-mode="attract" class="mode-btn">Watch</button>
+      <button data-mode="train" class="mode-btn">Train</button>
+      <button data-mode="race" class="mode-btn">Race</button>
+    </nav>
+
+    <label class="track-picker">
+      <span>Track</span>
+      <select id="track-select" aria-label="Track"></select>
+    </label>
+
+    <div id="race-controls" hidden>
+      <label>
+        <span>vs</span>
+        <select id="race-opponent">
+          <option value="quantum">Quantum</option>
+          <option value="mlp">MLP</option>
+        </select>
+      </label>
+      <button id="race-start" class="accent-btn">Start</button>
+      <button id="race-reset">Reset</button>
+    </div>
+
+    <div class="spacer"></div>
+    <div id="status-pill" class="pill pill-off">connecting…</div>
+  </header>
+
+  <main id="layout">
+    <section id="stage">
+      <canvas id="race-canvas"></canvas>
+      <div id="toast" hidden></div>
+    </section>
+
+    <aside id="sidebar">
+      <nav class="tabs" id="sidebar-tabs" aria-label="Panels">
+        <button data-tab="quantum" class="tab-btn active">Quantum</button>
+        <button data-tab="training" class="tab-btn">Training</button>
+        <button data-tab="explain" class="tab-btn">Explain</button>
+      </nav>
+
+      <div class="panel active" id="panel-quantum">
+        <h2>Live qubit readout</h2>
+        <p class="hint">Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the 4 qubits — one per action.</p>
+        <div id="qgauges"></div>
+        <h2>Q-values</h2>
+        <div id="qbars"></div>
+        <div id="qaction" class="qaction">—</div>
+        <h2>The circuit</h2>
+        <div id="circuit-diagram" class="circuit-scroll"></div>
+        <div id="circuit-legend"></div>
+      </div>
+
+      <div class="panel" id="panel-training">
+        <h2>Train an agent</h2>
+        <form id="train-form">
+          <label>
+            <span>Agent</span>
+            <select id="train-agent">
+              <option value="quantum">Quantum</option>
+              <option value="mlp">MLP</option>
+              <option value="both">Both</option>
+            </select>
+          </label>
+          <label>
+            <span>Episodes</span>
+            <input id="train-episodes" type="number" min="10" max="5000" step="10" value="400">
+          </label>
+          <label class="check">
+            <input id="train-warm" type="checkbox">
+            <span>Warm start (pre-trained weights)</span>
+          </label>
+          <div class="btn-row">
+            <button type="button" id="train-start" class="accent-btn">Start training</button>
+            <button type="button" id="train-stop">Stop</button>
+          </div>
+        </form>
+        <h2>Learning curves</h2>
+        <canvas id="training-chart" width="340" height="200"></canvas>
+        <div id="train-stats"></div>
+      </div>
+
+      <div class="panel" id="panel-explain"></div>
+    </aside>
+  </main>
+
+  <footer id="bottombar">
+    <div id="lapboard" aria-label="Lap board"></div>
+    <div id="attract-caption" class="caption" hidden></div>
+  </footer>
+
+  <script type="module" src="js/main.js"></script>
+</body>
+</html>

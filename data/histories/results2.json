@@ -1,0 +1,188 @@
+{
+  "gp_a_longslow": {
+    "clean_episode": 779,
+    "clean_wall_s": 42.9,
+    "final_return": 473.9,
+    "rc": 0
+  },
+  "gp_b_slower": {
+    "clean_episode": 1427,
+    "clean_wall_s": 93.2,
+    "final_return": 275.7,
+    "rc": 0
+  },
+  "gp_c_lowlr": {
+    "clean_episode": 797,
+    "clean_wall_s": 46.5,
+    "final_return": 305.5,
+    "rc": 0
+  },
+  "gp_d_gamma99": {
+    "clean_episode": 686,
+    "clean_wall_s": 47.0,
+    "final_return": 232.8,
+    "rc": 0
+  },
+  "gp_e_lowend": {
+    "clean_episode": 901,
+    "clean_wall_s": 64.1,
+    "final_return": 265.3,
+    "rc": 0
+  },
+  "gp_f_dense": {
+    "clean_episode": 1019,
+    "clean_wall_s": 63.0,
+    "final_return": 252.9,
+    "rc": 0
+  },
+  "gp_g_bigbatch": {
+    "clean_episode": 830,
+    "clean_wall_s": 71.4,
+    "final_return": 261.1,
+    "rc": 0
+  },
+  "gp_h_moreenvs": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 146.4,
+    "rc": 0
+  },
+  "gp_i_combo": {
+    "clean_episode": 860,
+    "clean_wall_s": 55.0,
+    "final_return": 197.7,
+    "rc": 0
+  },
+  "gp_j_verylong": {
+    "clean_episode": 3756,
+    "clean_wall_s": 322.8,
+    "final_return": 249.5,
+    "rc": 0
+  },
+  "gp_k_bigreplay": {
+    "clean_episode": 1015,
+    "clean_wall_s": 75.9,
+    "final_return": 226.9,
+    "rc": 0
+  },
+  "gp_l_sync400": {
+    "clean_episode": 1509,
+    "clean_wall_s": 89.3,
+    "final_return": 268.8,
+    "rc": 0
+  },
+  "gp_m_offtrack3": {
+    "clean_episode": 922,
+    "clean_wall_s": 52.4,
+    "final_return": 344.8,
+    "rc": 0
+  },
+  "gp_n_kitchen": {
+    "clean_episode": 3410,
+    "clean_wall_s": 139.0,
+    "final_return": 246.8,
+    "rc": 0
+  },
+  "gp_d_gamma99_s0": {
+    "clean_episode": 1410,
+    "clean_wall_s": 88.8,
+    "final_return": 189.4,
+    "rc": 0
+  },
+  "gp_d_gamma99_s1": {
+    "clean_episode": 1866,
+    "clean_wall_s": 118.3,
+    "final_return": 165.2,
+    "rc": 0
+  },
+  "gp_a_longslow_s0": {
+    "clean_episode": 1306,
+    "clean_wall_s": 90.8,
+    "final_return": 236.0,
+    "rc": 0
+  },
+  "gp_a_longslow_s1": {
+    "clean_episode": 1993,
+    "clean_wall_s": 118.8,
+    "final_return": 189.8,
+    "rc": 0
+  },
+  "gp_c_lowlr_s0": {
+    "clean_episode": 1667,
+    "clean_wall_s": 116.9,
+    "final_return": 254.8,
+    "rc": 0
+  },
+  "gp_c_lowlr_s1": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 165.3,
+    "rc": 0
+  },
+  "rob_oval_s0": {
+    "clean_episode": 203,
+    "clean_wall_s": 8.9,
+    "final_return": 687.6,
+    "rc": 0
+  },
+  "rob_oval_s1": {
+    "clean_episode": 223,
+    "clean_wall_s": 10.7,
+    "final_return": 1041.2,
+    "rc": 0
+  },
+  "rob_oval_s2": {
+    "clean_episode": 279,
+    "clean_wall_s": 14.8,
+    "final_return": 1276.9,
+    "rc": 0
+  },
+  "rob_oval_s3": {
+    "clean_episode": 210,
+    "clean_wall_s": 8.8,
+    "final_return": 907.7,
+    "rc": 0
+  },
+  "rob_oval_s4": {
+    "clean_episode": 208,
+    "clean_wall_s": 7.7,
+    "final_return": 997.8,
+    "rc": 0
+  },
+  "rob_chicane_s0": {
+    "clean_episode": 288,
+    "clean_wall_s": 14.3,
+    "final_return": 442.7,
+    "rc": 0
+  },
+  "rob_chicane_s1": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 90.2,
+    "rc": 0
+  },
+  "rob_chicane_s2": {
+    "clean_episode": 318,
+    "clean_wall_s": 16.5,
+    "final_return": 1249.2,
+    "rc": 0
+  },
+  "warm_oval_s0": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 20.1,
+    "rc": 0
+  },
+  "warm_oval_s1": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 8.7,
+    "rc": 0
+  },
+  "warm_oval_s2": {
+    "clean_episode": null,
+    "clean_wall_s": null,
+    "final_return": 38.7,
+    "rc": 0
+  }
+}
