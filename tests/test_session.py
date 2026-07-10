@@ -67,8 +67,8 @@ def test_resolve_training_cfg_presets_and_warm():
     assert warm_gp["gamma"] == 0.99
 
 
-def test_track_payload_shape():
-    session = DemoSession(load_config())
+def test_track_payload_shape(tmp_path):
+    session = DemoSession(load_config(), ghosts_dir=tmp_path)
     payload = track_payload(session.track)
     assert set(payload) == {"name", "half_width", "total_length", "checkpoints", "theme",
                             "start", "centerline", "left", "right"}
@@ -86,8 +86,8 @@ CAR_KEYS = {"id", "kind", "x", "y", "theta", "v", "lap", "progress",
             "last_lap_time", "off_track"}
 
 
-def test_attract_ticks_broadcast_and_move():
-    session = DemoSession(load_config())
+def test_attract_ticks_broadcast_and_move(tmp_path):
+    session = DemoSession(load_config(), ghosts_dir=tmp_path)
     assert session.mode == "attract"
 
     for _ in range(30):
@@ -115,8 +115,8 @@ def test_attract_ticks_broadcast_and_move():
     assert quantum[0]["car_id"] == "quantum"
 
 
-def test_welcome_payload():
-    session = DemoSession(load_config())
+def test_welcome_payload(tmp_path):
+    session = DemoSession(load_config(), ghosts_dir=tmp_path)
     welcome = session.welcome_payload()
     assert welcome["type"] == "welcome"
     assert welcome["mode"] == "attract"
@@ -143,8 +143,8 @@ def test_keys_to_controls_mapping():
     assert keys_to_controls(T | B | L | R) == (0.0, 0.0, 1.0)
 
 
-def test_race_mode_human_input_drives_car():
-    session = DemoSession(load_config())
+def test_race_mode_human_input_drives_car(tmp_path):
+    session = DemoSession(load_config(), ghosts_dir=tmp_path)
     session.handle_message(P.Race(action="start", opponent="mlp"))
     assert session.mode == "race"
     assert {car.kind for car in session.cars} == {"human", "mlp"}
@@ -178,8 +178,8 @@ def test_evolution_stage_specs_oval_and_fallback():
     assert all(path.is_file() for _, path in fallback)
 
 
-def test_evolution_mode_tick_shape():
-    session = DemoSession(load_config())
+def test_evolution_mode_tick_shape(tmp_path):
+    session = DemoSession(load_config(), ghosts_dir=tmp_path)
     session.handle_message(P.SetMode(mode="evolution"))
     assert session.mode == "evolution"
     assert len(session.cars) == 4
@@ -258,13 +258,13 @@ def test_attract_streams_injected_ghost_car(tmp_path):
 # ------------------------------------------------------------------ training
 
 
-def test_training_mode_smoke():
+def test_training_mode_smoke(tmp_path):
     config = make_config(
         reward={"max_decisions": 50},
         training={"n_parallel_envs": 4, "replay_size": 2000, "batch_size": 16,
                   "epsilon_decay_episodes": 6, "target_sync_every": 50},
     )
-    session = DemoSession(config)
+    session = DemoSession(config, ghosts_dir=tmp_path)
     session.handle_message(P.Train(action="start", agent="mlp", track="oval", episodes=8))
     assert session.mode == "train"
     assert "mlp" in session.jobs
@@ -301,12 +301,12 @@ def test_training_mode_smoke():
     assert train_states[-1]["cars"][0]["kind"] == "mlp"
 
 
-def test_train_stop_ends_training():
+def test_train_stop_ends_training(tmp_path):
     config = make_config(
         reward={"max_decisions": 400},
         training={"n_parallel_envs": 4, "replay_size": 2000, "batch_size": 16},
     )
-    session = DemoSession(config)
+    session = DemoSession(config, ghosts_dir=tmp_path)
     session.handle_message(P.Train(action="start", agent="mlp", episodes=100_000))
     job = session.jobs["mlp"]
     session.handle_message(P.Train(action="stop", agent="mlp"))

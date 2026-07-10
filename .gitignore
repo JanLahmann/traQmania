@@ -12,3 +12,6 @@ venv/
 *.local.toml
 .env
 .claude/settings.local.json
+
+# runtime-recorded ghost laps are per-installation state
+traqmania/data/ghosts/
