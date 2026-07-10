@@ -3,6 +3,8 @@
 **A quantum reinforcement learning demo, Trackmania-style.** Watch a variational
 quantum circuit learn to race — then grab the keyboard and try to beat it.
 
+![traQmania demo: attract mode, live quantum training, and race mode](docs/traqmania-hero.gif)
+
 - Quantum Deep Q-Learning (4 qubits, ~56 trainable parameters) built on
   [Qiskit](https://www.ibm.com/quantum/qiskit) and
   [qiskit-machine-learning](https://github.com/qiskit-community/qiskit-machine-learning),
