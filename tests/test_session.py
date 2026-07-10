@@ -136,10 +136,11 @@ def test_keys_to_controls_mapping():
     assert keys_to_controls(T) == (0.0, 1.0, 0.0)
     assert keys_to_controls(B) == (0.0, 0.0, 1.0)
     assert keys_to_controls(T | B) == (0.0, 0.0, 1.0)  # brake overrides throttle
-    assert keys_to_controls(L) == (-1.0, 0.0, 0.0)
-    assert keys_to_controls(R) == (1.0, 0.0, 0.0)
-    assert keys_to_controls(T | L) == (-1.0, 1.0, 0.0)
-    assert keys_to_controls(T | R) == (1.0, 1.0, 0.0)
+    # car steer +1 = theta increase = counterclockwise = LEFT on screen
+    assert keys_to_controls(L) == (1.0, 0.0, 0.0)
+    assert keys_to_controls(R) == (-1.0, 0.0, 0.0)
+    assert keys_to_controls(T | L) == (1.0, 1.0, 0.0)
+    assert keys_to_controls(T | R) == (-1.0, 1.0, 0.0)
     assert keys_to_controls(L | R) == (0.0, 0.0, 0.0)  # opposite steering cancels
     assert keys_to_controls(T | B | L | R) == (0.0, 0.0, 1.0)
 
@@ -173,7 +174,8 @@ def test_analog_input_overrides_keys(tmp_path):
     for _ in range(12):
         session.tick()
     human = next(car for car in session.cars if car.kind == "human")
-    assert human.controls == (-0.5, 0.7, 0.0)  # absent brake axis defaults to 0.0
+    # stick steer -0.5 (leftward) flips to car steer +0.5 (theta+ = screen-left)
+    assert human.controls == (0.5, 0.7, 0.0)  # absent brake axis defaults to 0.0
     assert human.state[3] > 0.0  # analog throttle accelerated the car
 
     # a keys-only input clears the analog override

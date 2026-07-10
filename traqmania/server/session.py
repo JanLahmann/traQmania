@@ -57,14 +57,15 @@ HARDWARE_STATUS_MIN_INTERVAL_S = 0.2  # running-phase hardware_status throttled 
 def keys_to_controls(keys: int) -> tuple[float, float, float]:
     """input.keys bitmask -> (steer, throttle, brake).
 
-    Bits: 1 throttle, 2 brake, 4 left (steer -1), 8 right (steer +1).
+    Bits: 1 throttle, 2 brake, 4 left, 8 right. Car steer +1 increases theta
+    (counterclockwise = a LEFT turn on screen), so the left key maps to +1.
     Left+right cancel; brake overrides throttle.
     """
     steer = 0.0
     if keys & protocol.KEY_LEFT:
-        steer -= 1.0
-    if keys & protocol.KEY_RIGHT:
         steer += 1.0
+    if keys & protocol.KEY_RIGHT:
+        steer -= 1.0
     brake = 1.0 if keys & protocol.KEY_BRAKE else 0.0
     throttle = 1.0 if (keys & protocol.KEY_THROTTLE) and not brake else 0.0
     return steer, throttle, brake
@@ -272,9 +273,11 @@ class DemoSession:
 
         ``analog`` is ``(steer, throttle, brake)``; when not None it drives the
         human car instead of the keys bitmask (until a later keys-only input).
+        Client steer is stick-sign (+1 = stick right); car steer +1 turns left
+        (theta increases), so the sign flips here.
         """
         self._keys = int(keys)
-        self._analog = analog
+        self._analog = (-analog[0], analog[1], analog[2]) if analog is not None else None
 
     def handle_message(self, msg: Any) -> None:
         """Apply a parsed client message to the session state."""

@@ -14,7 +14,7 @@ const sections = ({ n_qubits: n = 4, n_layers: layers = 4, n_params: np = {} } =
       <em>quantum circuit</em>. A tiny ${n}-qubit parameterized circuit reads the
       car's sensors — ${RAY_WORDS[n - 1] || n - 1} lidar rays, speed and heading —
       and its measurement
-      results decide whether to steer left, go straight, steer right, or
+      results decide whether to steer right, go straight, steer left, or
       brake.</p>
       <p>A classical neural network (MLP) of similar size trains on exactly the
       same game, so you can compare the two approaches head to head — or race

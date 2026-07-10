@@ -27,7 +27,11 @@ const EDGE_COLORS = {
   "kerb-white": "#dfe3ea",
 };
 
-const RAY_ANGLES = [-Math.PI / 3, 0, Math.PI / 3]; // matches [observation].ray_angles_deg
+// Ray fan: n rays evenly spaced over [-60°, +60°], matching how the config
+// profiles lay out [observation].ray_angles_deg for any qubit count.
+function rayAngle(i, n) {
+  return n > 1 ? -Math.PI / 3 + ((2 * Math.PI) / 3) * (i / (n - 1)) : 0;
+}
 const RAY_MAX_DIST = 30; // [observation].ray_max_dist — rays assumed normalized [0,1]
 
 function themeColor(map, key, fallback) {
@@ -436,8 +440,8 @@ export class RaceRenderer {
   _drawRays(ctx, car) {
     ctx.strokeStyle = "rgba(122,92,255,0.35)";
     ctx.lineWidth = 0.18;
-    for (let i = 0; i < Math.min(car.rays.length, RAY_ANGLES.length); i++) {
-      const a = car.theta + RAY_ANGLES[i];
+    for (let i = 0; i < car.rays.length; i++) {
+      const a = car.theta + rayAngle(i, car.rays.length);
       const d = Math.max(0, Math.min(1, car.rays[i])) * RAY_MAX_DIST;
       ctx.beginPath();
       ctx.moveTo(car.x, car.y);

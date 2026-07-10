@@ -13,7 +13,8 @@ import numpy as np
 
 N_ACTIONS = 4
 
-# (steer, throttle, brake): left/straight/right at full throttle, plus coast-brake.
+# (steer, throttle, brake): steer +1 increases theta = counterclockwise = a LEFT
+# turn on screen, so this is right/straight/left at full throttle, plus coast-brake.
 ACTIONS = ((-1, 1, 0), (0, 1, 0), (1, 1, 0), (0, 0, 1))
 
 

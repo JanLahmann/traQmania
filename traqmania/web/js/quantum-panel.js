@@ -2,7 +2,8 @@
 // [-1, 1] plus a Q-value bar chart with argmax highlight. Gauge/bar counts
 // follow the incoming `quantum` messages. UI updates throttled to <= 15 fps.
 
-export const ACTION_LABELS = ["Left", "Straight", "Right", "Brake"];
+// Action 0 steers -1 (theta decreases = clockwise = RIGHT on screen); action 2 is +1 = left.
+export const ACTION_LABELS = ["Right", "Straight", "Left", "Brake"];
 
 const UPDATE_MS = 67; // ~15 fps
 const DEFAULT_COUNT = 4; // shown until the first quantum message arrives

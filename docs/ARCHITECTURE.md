@@ -53,7 +53,7 @@ flowchart LR
 | `traqmania/env/track.py` | Closed-loop track geometry: resampling, arc-length projection, lidar raycasts, spatial-hash acceleration, validation. |
 | `traqmania/env/car.py` | Vectorized bicycle-ish car physics (throttle/brake/drag, speed-dependent steering). |
 | `traqmania/env/racing_env.py` | Gym-style vector env: obs = lidar rays (`[observation] ray_angles_deg`, 3 by default) + speed, progress reward, checkpoint/lap bonuses, off-track penalty, auto-reset. |
-| `traqmania/agents/base.py` | `QFunction` protocol + the 4 discrete actions (left/straight/right at full throttle, coast-brake). |
+| `traqmania/agents/base.py` | `QFunction` protocol + the 4 discrete actions (right/straight/left at full throttle, coast-brake — car steer +1 turns left on screen). |
 | `traqmania/agents/quantum/circuit.py` | Canonical Qiskit circuit (single source of truth) + JSON `circuit_spec` for the browser diagram. |
 | `traqmania/agents/quantum/fastsim.py`, `adjoint.py` | Hand-written numpy statevector simulator and adjoint (backprop-style) gradients. |
 | `traqmania/agents/quantum/qdqn.py` | `QuantumQFunction`: fastsim-backed `QFunction`, flat `[lam, theta, w, b]` layout, P = 3·L·n + 8 params (56 at 4 qubits, 80 at 6). |
@@ -312,7 +312,7 @@ numpy, parameters in one flat vector:
 ```python
 class MyQFunction:
     n_features: int   # lidar rays + speed (4 at the default config)
-    n_actions: int    # always 4 = left / straight / right / brake
+    n_actions: int    # always 4 = right / straight / left / brake
 
     def q_values(self, obs):            # (B, F) -> (B, A)
     def grad_selected(self, obs, action_idx, upstream):  # -> (P,)
