@@ -34,14 +34,15 @@ jobs:
           cache: pip
       - name: Install
         run: pip install -e ".[notebooks,hardware]"
-      - name: Execute notebooks 01-04
+      - name: Execute notebooks 01-04 and 06
         run: |
           jupyter nbconvert --to notebook --execute --output-dir /tmp/nb-out \
             --ExecutePreprocessor.timeout=900 \
             notebooks/01_the_racing_env.ipynb \
             notebooks/02_q_learning_from_scratch.ipynb \
             notebooks/03_quantum_circuits_as_q_functions.ipynb \
-            notebooks/04_training_the_quantum_driver.ipynb
+            notebooks/04_training_the_quantum_driver.ipynb \
+            notebooks/06_scaling_and_features.ipynb
       - name: Execute notebook 05 (hardware cells no-op)
         env:
           TRAQMANIA_SKIP_HW: "1"

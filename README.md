@@ -33,7 +33,7 @@ docker run --rm -p 8000:8000 ghcr.io/janlahmann/traqmania
 
 ## Notebooks
 
-Five teaching notebooks build the whole stack up from scratch — no local install
+Six teaching notebooks build the whole stack up from scratch — no local install
 needed, each badge launches on Binder (via [QuBins](https://qubins.org) `xl`
 images with Qiskit preinstalled):
 
@@ -44,6 +44,7 @@ images with Qiskit preinstalled):
 | [03 — Quantum circuits as Q-functions](notebooks/03_quantum_circuits_as_q_functions.ipynb) | the data re-uploading VQC, expressivity, fastsim ≡ `EstimatorQNN`, dead parameters, adjoint vs param-shift | [![Binder](https://mybinder.org/badge_logo.svg)](https://qubins.org/launch/?image=latest-xl&repo=https://github.com/JanLahmann/traQmania&branch=main&path=notebooks/03_quantum_circuits_as_q_functions.ipynb) |
 | [04 — Training the quantum driver](notebooks/04_training_the_quantum_driver.ipynb) | live quantum DQN training, quantum-vs-classical curves over seeds, lap-time table, honest takeaways | [![Binder](https://mybinder.org/badge_logo.svg)](https://qubins.org/launch/?image=latest-xl&repo=https://github.com/JanLahmann/traQmania&branch=main&path=notebooks/04_training_the_quantum_driver.ipynb) |
 | [05 — Real quantum hardware](notebooks/05_real_quantum_hardware.ipynb) | shots, device noise, SPSA hardware sprints, and laps on IBM Quantum devices | [![Binder](https://mybinder.org/badge_logo.svg)](https://qubins.org/launch/?image=latest-xl&repo=https://github.com/JanLahmann/traQmania&branch=main&path=notebooks/05_real_quantum_hardware.ipynb) |
+| [06 — More qubits or better features?](notebooks/06_scaling_and_features.ipynb) | sensor scaling 4→10 qubits vs engineered observations, learning curves over seeds, matched MLP baselines, the gp failure-and-rescue | [![Binder](https://mybinder.org/badge_logo.svg)](https://qubins.org/launch/?image=latest-xl&repo=https://github.com/JanLahmann/traQmania&branch=main&path=notebooks/06_scaling_and_features.ipynb) |
 
 ## Measured results (Apple Silicon laptop, seed-robust)
 
@@ -56,14 +57,31 @@ images with Qiskit preinstalled):
 Warm-start live demo: from the bundled pre-first-lap checkpoint, the quantum agent
 gets its first clean lap in **1.4–2.8 s** of training (oval, 3/3 seeds).
 
-**4 vs 6 qubits** (oval; `--profile q6` senses with 5 lidar rays instead of 3):
-80 vs 56 parameters (+43 %), first clean lap at episode 286/311/352 across seeds
-vs ≈ 300 — the same sample efficiency — and best lap 14.7 s vs 14.4 s. Honest
-takeaway: the extra qubits neither help nor hurt learning on this track; treat it
-as a real scaling data point, not a success story. (Wall-clock to a first lap is
-~28 s vs ~11 s, but that is per-episode compute, not learning speed: the 6-qubit
-statevector is 4× larger — 64 vs 16 amplitudes — and the 6-qubit runs also shared
-the machine three-at-once.)
+**Scaling qubits vs engineering features** (oval; greedy eval, 6 standing-start
+episodes per seed, best seed shown — full seed spreads in
+[docs/SCIENCE.md](docs/SCIENCE.md)). Extra qubits widen the observation register:
+either more lidar rays ("rays + speed") or hand-engineered features (track
+curvature ahead, corner-speed ratio, lateral offset, heading error):
+
+| Qubits (profile) | Params | Best oval lap, rays + speed | Best oval lap, engineered features |
+|---|---|---|---|
+| 4 (default) | 56 | 14.4 s | — (register full: 3 rays + speed) |
+| 6 (`q6`) | 80 | 14.7 s | 13.7 s |
+| 8 (`q8`) | 104 | 14.0 s | **13.6 s** |
+| 10 (`q10`) | 128 | 13.7 s | 14.2 s |
+
+Sample efficiency stays roughly flat from 4 to 10 qubits (first clean lap between
+episode ~190 and ~475 everywhere); what grows is per-decision compute, as the
+statevector goes 16 → 1024 amplitudes (fastsim greedy: ≲1 ms per decision at 4–6
+qubits, ~1.2–2 ms at 8, ~5–9 ms at 10). More rays alone actually *regressed* the
+hard gp track — the 5-ray `q6` profile fails greedy gp eval on all seeds (0–1/6
+laps at 2000 episodes), which is why no `quantum_gp_q6.npz` ships — while trading
+rays for engineered features rescued it (two features, curvature ahead +
+corner-speed ratio: 4–5/6 laps on 2 of 3 seeds) and produced our fastest quantum
+laps on the oval. Those same features do **not** help
+the matched MLP baselines (92–124 params: 13.5–14.1 s rays-only vs 14.1–14.6 s
+with features, ~0.01 ms/decision) — yet the MLP still matches or beats every
+quantum lap time, so this stays parity, not advantage.
 
 Why we train on a simulator and run inference on hardware: one double-DQN update is
 **~3.4 ms** with the numpy statevector + adjoint path vs **~20.5 s** with
@@ -97,4 +115,4 @@ noise (`aer_noisy`).
   track / agent / mode.
 - [The science](docs/SCIENCE.md) — the circuit, algorithm lineage, training
   and hardware approach, measured results, and what this demo does *not* claim.
-- [Notebooks](#notebooks) — the five-part build-it-from-scratch course above.
+- [Notebooks](#notebooks) — the six-part build-it-from-scratch course above.

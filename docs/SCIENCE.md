@@ -1,7 +1,7 @@
 # The science behind traQmania
 
 What the quantum agent actually is, how it is trained, what runs on real
-hardware, and — importantly — what this demo does and does not show. The five
+hardware, and — importantly — what this demo does and does not show. The six
 [notebooks](../notebooks/) build all of this up from scratch with runnable
 code; this page is the condensed reference.
 
@@ -127,29 +127,88 @@ seeds). One double-DQN update: **~3.4 ms** fastsim/adjoint vs **~20.5 s**
 
 The circuit generalizes over `n_qubits` (config profiles `q6`, `q8`, `q10`;
 the default stays 4 and is bit-identical to the pre-scaling stack, pinned by
-a regression test). Extra qubits widen the *feature* register — n − 1 lidar
-rays evenly spaced over [−60°, +60°] plus speed, one feature per qubit —
-while the 4 actions and the Z_0…Z_3 readout stay fixed. Trained 6-qubit
-weights ship for the oval (`quantum_oval_q6.npz`: seed 42, 600 episodes,
-best greedy-eval lap 14.7 s over 24 laps); `q8`/`q10` are untrained options.
-Measured head-to-head on the oval:
+a regression test). Extra qubits widen the *feature* register — by default
+n − 1 lidar rays evenly spaced over [−60°, +60°] plus speed, one feature per
+qubit — while the 4 actions and the Z_0…Z_3 readout stay fixed. Trained
+6-qubit weights ship for the oval (`quantum_oval_q6.npz`: seed 42, 600
+episodes, best greedy-eval lap 14.7 s over 24 laps) and the chicane
+(`quantum_chicane_q6.npz`: 14.8 s, 6/6 greedy laps), plus a pre-first-lap
+oval warm-start checkpoint (`quantum_oval_warmstart_q6.npz`); `q8`/`q10` are
+config options whose training histories live in `data/histories/` but whose
+weights are not bundled. Measured on the oval (greedy eval, 6 standing-start
+episodes per seed; campaign of 3–5 seeds per variant):
 
-| | 4 qubits (3 rays) | 6 qubits (5 rays) |
-|---|---|---|
-| Trainable parameters | 56 | 80 (+43 %) |
-| Episodes to first clean lap | ≈ 300 | 286 / 311 / 352 (seeds 42/1/0) |
-| Wall-clock to first clean lap | ~11 s | ~28 s |
-| Best lap (greedy) | 14.4 s | 14.7 s |
+| | 4 qubits | 6 qubits | 8 qubits | 10 qubits |
+|---|---|---|---|---|
+| Lidar rays (plain profile) | 3 | 5 | 7 | 9 |
+| Trainable parameters | 56 | 80 | 104 | 128 |
+| First clean lap (episode, seed range) | ≈ 300 | 286–352 | 226–465 | 190–259 |
+| Best greedy lap | 14.4 s | 14.7 s | 14.0 s | 13.7 s |
+| Greedy-eval robustness | bundled, robust | 3/3 seeds lap (14.7/15.4/16.0 s) | 4/5 lap 6/6 (14.0/14.5/16.2/16.3 s); one seed 0/6 | 3/4 lap 6/6 (13.7/14.8/16.2 s); one seed 3/6 |
+| ms per greedy decision (fastsim) | < 1 | 0.6–1 | 1.2–2 | 4.6–8.7 |
 
-The honest reading: on the oval, 5 rays instead of 3 buys **no lap-time
-win** — the extra qubits neither help nor hurt learning on this task. This
-is a real scaling data point, not a success story. Sample efficiency (per
-episode) is the same; the wall-clock gap is per-episode compute cost, not
-learning speed — a 6-qubit statevector is 4× larger (64 vs 16 amplitudes),
-and the 6-qubit runs additionally shared the machine three-at-once. The
+The honest reading: sample efficiency per *episode* is roughly flat from 4
+to 10 qubits — a real scaling data point, not a success story. The best q8
+and q10 laps edge ahead of the 4-qubit 14.4 s, but with a wide seed spread
+(one q8 seed never laps the greedy eval at all); what grows reliably is
+per-decision compute, since the statevector goes 16 → 1024 amplitudes.
+Under 1024-shot Aer sampling the evaluated 8-qubit policy still laps 6/6
+(14.5 s, ~18 ms/decision); the evaluated 10-qubit seed — already the least
+robust in fastsim at 3/6 — stays at 3/6 (16.1 s, ~24 ms/decision). The
 fastsim/`EstimatorQNN` parity and gradient checks run at 6 qubits too
 (forward agreement ≤ 1e-9; all 80 gradients verified against finite
 differences), and the dead-parameter teaching point above holds at any n.
+
+Scaling also produced an honest failure: on the hard gp track, the plain
+5-ray `q6` profile **fails greedy eval on every seed** (0/6, 0/6, 1/6 laps
+after 2000 episodes) even though the 4-qubit default laps gp 6/6 at 20.4 s —
+more rays alone *regressed* the hard track. `quantum_gp_q6.npz` is therefore
+deliberately not bundled. Engineered observations restored it — next
+subsection.
+
+### Observation engineering
+
+The observation registry (`[observation] features` in the config;
+`traqmania/env/racing_env.py`) lets any qubit count trade lidar rays for
+engineered scalars, one feature per qubit, all normalized to [0, 1]:
+
+- `rays` — lidar distances (the default), `speed` — car speed;
+- `curvature_ahead` — max centerline |κ| over a lookahead window;
+- `lateral_offset` — signed centerline offset / half-width;
+- `heading_error` — wrapped angle to the track tangent / π;
+- `corner_speed_ratio` — v / v_safe(R) with R = 1/max(|κ_ahead|, 1e-6) and
+  v_safe = √(max(0, 2·k_steer·v_turn·R − v_turn²)), derived from the car
+  model's steering kinematics (the same “why you must brake for hairpins”
+  analysis as notebook 01; derivation in the `racing_env.py` docstring) —
+  “am I too fast for the corner coming up?”
+
+Measured variants (same DQN hyperparameters as the plain runs, 3 seeds,
+greedy eval with 6 standing-start episodes):
+
+- **`q6feat`** (80 params: 3 rays + speed + curvature_ahead +
+  corner_speed_ratio), oval: best laps **13.7/13.8/13.8 s** across seeds
+  (6/6, 4/6, 6/6 episodes lapped) — faster than plain q6 (14.7 s) *and* the
+  4-qubit default (14.4 s). On the chicane: 13.9–15.8 s across seeds. On gp
+  (`featgp`): laps 5/6 at 23.3 s and 4/6 at 23.1 s on two seeds, 0/6 on the
+  third — restoring the track that plain 5-ray q6 lost entirely, though
+  slower than the 4-qubit default (20.4 s) or the MLP (19.2 s).
+- **`q8feat`** (104: adds lateral_offset + heading_error), oval:
+  **13.6/13.8/13.9 s, all seeds 6/6** — 13.6 s is the best quantum lap in
+  this project.
+- **`q10feat`** (128: 5 rays + speed + all four features), oval: 14.2 s
+  (one seed 6/6, one 1/6; only 2 seeds run) — the trend does not continue.
+
+The curious part is an **asymmetry**: identical features do *not* help the
+matched MLP baselines. On the oval the rays-only MLPs run 13.5–14.1 s
+(92/108/124 params at the q6/q8/q10 observation widths, all seeds 6/6,
+~0.01 ms/decision) while the feature-observation MLP (`mlp_featoval_q6`)
+runs 14.1–14.6 s — the features made the classical baseline *slower* and
+the quantum circuit *faster*. We flag this explicitly as an open
+observation, not a claim: it rests on one environment, 3 seeds per variant,
+and no per-variant hyperparameter search; a plausible mundane explanation
+(smooth low-dimensional scalars may simply suit the RY-angle encoding
+better than ray geometry) is untested. Notebook 06 has the learning curves
+and the full comparison.
 
 ## Honest claims
 
@@ -160,13 +219,19 @@ Being honest matters more than being exciting:
   efficiency and comparable lap times (quantum edges ahead on oval/chicane,
   the MLP on gp — a few percent, within seed noise). That a VQC *can* do this
   is the point, echoing Chen et al. (2020) and Skolik et al. (2022). The
-  6-qubit variant tells the same story: +43 % parameters, same sample
-  efficiency, no faster laps.
+  scaled variants tell the same story: 4 → 10 qubits keeps sample efficiency
+  roughly flat, and even the best engineered-feature quantum lap (13.6 s) is
+  matched by a rays-only MLP (13.5–13.7 s) at ~1/100th the decision cost.
 - **No quantum advantage is claimed — or possible here.** Four qubits — or
   ten — are trivially simulable; training literally ran on a classical
   simulation of the circuit. An advantage claim would need problem classes
   where a quantum model provably captures structure a comparably-sized
   classical model cannot, not a racing toy.
+- **We do not claim engineered features prove quantum advantage.** On the
+  oval, hand-engineered observations made the VQC faster and the matched MLP
+  slower — an intriguing asymmetry, but observed in one environment, with 3
+  seeds per variant and no per-variant hyperparameter search. It is a thing
+  to poke at (notebook 06), not evidence of anything quantum.
 - **Watch the denominators.** “Similar sample efficiency” is per *episode*;
   per *second* the MLP trains far faster (cheaper gradients). Parameter count
   is an imperfect fairness measure — expressivity per parameter differs.
