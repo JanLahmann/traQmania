@@ -35,6 +35,7 @@ from traqmania.env.car import CarPhysics
 from traqmania.env.racing_env import RacingEnv
 from traqmania.server import protocol
 from traqmania.server.runtime import (
+    WEIGHTS_DIR,
     available_tracks,
     evolution_stage_specs,
     load_agent,
@@ -49,6 +50,7 @@ HUMAN_RESPAWN_DELAY_S = 1.0
 QUANTUM_MSG_MIN_INTERVAL_S = 0.099  # <= 10 Hz
 LAP_TIMES_KEEP = 50  # telemetry keeps the last N (episode, lap_s) pairs
 GHOST_TRAJ_MAX_POINTS = 20_000  # ~33 min at 10 Hz; laps beyond this are not recorded
+HARDWARE_STATUS_MIN_INTERVAL_S = 0.2  # running-phase hardware_status throttled to <= 5 Hz
 
 
 def keys_to_controls(keys: int) -> tuple[float, float, float]:
@@ -111,6 +113,47 @@ class TrainingJob:
     lap_times: list = field(default_factory=list)  # [episode, lap_s] pairs, last <= 50
     best_lap_s: float | None = None
     best_announced: float | None = None  # last best_lap_s emitted as new_best_lap
+
+
+@dataclass
+class HardwareJob:
+    """One background hardware-execution thread (lap rollout or SPSA sprint).
+
+    The worker appends ready-to-send ``hardware_status`` payload dicts to
+    ``queue`` under ``lock``; the session tick drains them into the outbox.
+    """
+
+    kind: str  # "lap" | "sprint"
+    stop_event: threading.Event
+    thread: threading.Thread | None = None
+    lock: threading.Lock = field(default_factory=threading.Lock)
+    queue: list = field(default_factory=list)
+    result: dict | None = None
+    error: str | None = None
+    aborted: bool = False  # abort requested (via message or mode switch)
+    abandoned: bool = False  # mode switched away: reap silently
+    last_running_emit: float = -math.inf  # time.monotonic() of last running status
+
+    def push(self, phase: str, **fields: Any) -> None:
+        """Thread-safe enqueue of a hardware_status payload (from the worker)."""
+        payload = {"type": "hardware_status", "phase": phase, **fields}
+        with self.lock:
+            self.queue.append(payload)
+
+    def push_running(self, **fields: Any) -> None:
+        """Enqueue a running-phase status, throttled to <= 5 Hz."""
+        now = time.monotonic()
+        with self.lock:
+            if now - self.last_running_emit < HARDWARE_STATUS_MIN_INTERVAL_S:
+                return
+            self.last_running_emit = now
+            self.queue.append({"type": "hardware_status", "phase": "running", **fields})
+
+    def drain(self) -> list[dict]:
+        with self.lock:
+            out = self.queue
+            self.queue = []
+        return out
 
 
 class _TrainingLapMonitor:
@@ -176,8 +219,11 @@ class DemoSession:
         self._substep = 0
         self._outbox: list[dict] = []
         self._keys = 0
+        self._analog: tuple[float, float, float] | None = None
         self._agent_cache: dict[tuple[str, str], Any] = {}
         self._last_quantum_emit: dict[str, float] = {}
+        self.hw_job: HardwareJob | None = None
+        self._hw_replay: dict | None = None  # {points, lap_time, start_substep}
 
         self.mode = "attract"
         self.track_name = str(config["track"]["default"])
@@ -210,16 +256,24 @@ class DemoSession:
     def _event(self, kind: str, **fields: Any) -> None:
         self._outbox.append({"type": "event", "kind": kind, **fields})
 
-    def set_input(self, keys: int) -> None:
-        """Last-writer-wins human input bitmask."""
+    def set_input(self, keys: int, analog: tuple[float, float, float] | None = None) -> None:
+        """Last-writer-wins human input: bitmask plus optional analog override.
+
+        ``analog`` is ``(steer, throttle, brake)``; when not None it drives the
+        human car instead of the keys bitmask (until a later keys-only input).
+        """
         self._keys = int(keys)
+        self._analog = analog
 
     def handle_message(self, msg: Any) -> None:
         """Apply a parsed client message to the session state."""
         if isinstance(msg, protocol.Hello):
             return  # welcome is sent per-connection by the ws layer
         if isinstance(msg, protocol.Input):
-            self.set_input(msg.keys)
+            analog = None
+            if msg.steer is not None or msg.throttle is not None or msg.brake is not None:
+                analog = (msg.steer or 0.0, msg.throttle or 0.0, msg.brake or 0.0)
+            self.set_input(msg.keys, analog)
         elif isinstance(msg, protocol.SetMode):
             self._set_mode(msg.mode)
         elif isinstance(msg, protocol.SetTrack):
@@ -228,6 +282,8 @@ class DemoSession:
             self._handle_train(msg)
         elif isinstance(msg, protocol.Race):
             self._handle_race(msg)
+        elif isinstance(msg, protocol.HardwareMsg):
+            self._handle_hardware(msg)
         else:
             self._error(f"unhandled message: {msg!r}")
 
@@ -239,6 +295,8 @@ class DemoSession:
     def _set_mode(self, mode: str) -> None:
         if mode != "train":
             self.stop_training()
+        if mode != "hardware":
+            self._abandon_hardware()
         self.mode = mode
         if mode == "attract":
             self._enter_attract()
@@ -246,12 +304,17 @@ class DemoSession:
             self._enter_race("quantum")
         elif mode == "evolution":
             self._enter_evolution()
+        elif mode == "hardware":
+            self._enter_hardware()
         else:  # train: cars appear once a train{start} arrives
             self.cars = []
 
     def _set_track(self, name: str) -> bool:
         if self._training_alive():
             self._error("cannot change track while training is running")
+            return False
+        if self._hardware_alive():
+            self._error("cannot change track while a hardware job is running")
             return False
         if name not in available_tracks():
             self._error(f"unknown track '{name}'")
@@ -267,6 +330,8 @@ class DemoSession:
             self._enter_race(opponent)
         elif self.mode == "evolution":
             self._enter_evolution()
+        elif self.mode == "hardware":
+            self._enter_hardware()
         return True
 
     def _enter_attract(self) -> None:
@@ -303,6 +368,12 @@ class DemoSession:
             self._respawn(car)
             cars.append(car)
         self.cars = cars
+
+    def _enter_hardware(self) -> None:
+        """Current track with one idle fastsim quantum car (drives during replay)."""
+        self._hw_replay = None
+        self.cars = [self._make_agent_car("quantum")]
+        self._outbox.append({"type": "hardware_status", "phase": "idle"})
 
     def _handle_race(self, msg: protocol.Race) -> None:
         if msg.track is not None and not self._set_track(msg.track):
@@ -383,11 +454,15 @@ class DemoSession:
             job.stop_event.set()
 
     def shutdown(self) -> None:
-        """Stop training threads and wait briefly for them to exit."""
+        """Stop training/hardware threads and wait briefly for them to exit."""
         self.stop_training()
+        if self.hw_job is not None:
+            self.hw_job.stop_event.set()
         for job in self.jobs.values():
             if job.thread is not None:
                 job.thread.join(timeout=10.0)
+        if self.hw_job is not None and self.hw_job.thread is not None:
+            self.hw_job.thread.join(timeout=10.0)
 
     def _emit_telemetry(self, job: TrainingJob, final: bool = False) -> None:
         with job.lock:
@@ -430,14 +505,189 @@ class DemoSession:
             self._event("training_done", agent=job.agent)
             job.announced = True
 
+    # ---------------------------------------------------------------- hardware
+
+    def _hardware_alive(self) -> bool:
+        job = self.hw_job
+        return job is not None and job.thread is not None and job.thread.is_alive()
+
+    def _abandon_hardware(self) -> None:
+        """Mode switched away: request cancellation, reap silently."""
+        self._hw_replay = None
+        if self.hw_job is not None:
+            self.hw_job.stop_event.set()
+            self.hw_job.aborted = True
+            self.hw_job.abandoned = True
+
+    def _handle_hardware(self, msg: protocol.HardwareMsg) -> None:
+        if msg.action == "abort":
+            if self._hardware_alive():
+                self.hw_job.stop_event.set()
+                self.hw_job.aborted = True
+            else:
+                self._outbox.append({"type": "hardware_status", "phase": "idle",
+                                     "message": "no hardware job running"})
+            return
+        if self._hardware_alive():
+            self._outbox.append({"type": "hardware_status", "phase": "error",
+                                 "message": "a hardware job is already running"})
+            return
+        if self.hw_job is not None:  # finished but not yet reaped: flush its statuses
+            self._tick_hardware()
+        try:
+            # Must happen on THIS long-lived thread, before any worker thread
+            # touches qiskit — see hardware.ensure_qiskit_imported for the
+            # segfault this prevents.
+            from traqmania import hardware as hardware_mod
+            hardware_mod.ensure_qiskit_imported()
+        except Exception as exc:  # e.g. qiskit-ibm-runtime not installed
+            self._outbox.append({"type": "hardware_status", "phase": "error",
+                                 "message": f"{type(exc).__name__}: {exc}"})
+            return
+        self.stop_training()
+        if self.mode != "hardware":
+            self.mode = "hardware"
+            self._enter_hardware()
+        else:  # reset any previous replay; car waits at the start line again
+            self._hw_replay = None
+            self.cars = [self._make_agent_car("quantum")]
+
+        hw_cfg = self.config.get("hardware", {})
+        shots = int(msg.shots) if msg.shots is not None else int(hw_cfg.get("shots", 1024))
+        iterations = (int(msg.iterations) if msg.iterations is not None
+                      else int(hw_cfg.get("spsa_iterations", 30)))
+        use_fake = msg.backend == "fake"
+        track_name = self.track_name
+        weights_path = WEIGHTS_DIR / f"quantum_{track_name}.npz"
+        max_decisions = msg.max_decisions
+
+        job = HardwareJob(kind=msg.action, stop_event=threading.Event())
+
+        def run(job: HardwareJob = job) -> None:
+            from traqmania import hardware
+
+            try:
+                job.push("connecting",
+                         message="local fake backend" if use_fake
+                         else "connecting to IBM Quantum (least busy backend)")
+                backend = hardware.get_backend(use_fake=use_fake)
+                backend_name = str(getattr(backend, "name", backend))
+                job.push("transpiling", backend_name=backend_name,
+                         message=f"transpiling circuit for {backend_name}")
+                if job.kind == "lap":
+                    def on_decision(i: int, info: dict) -> None:
+                        job.push_running(backend_name=backend_name, decision=i + 1,
+                                         seconds_per_decision=float(info["seconds"]))
+
+                    job.result = hardware.run_hardware_lap(
+                        track_name, weights_path, backend, shots=shots,
+                        max_decisions=max_decisions, on_decision=on_decision,
+                        stop_event=job.stop_event)
+                else:  # sprint
+                    def on_iter(k: int, info: dict) -> None:
+                        job.push("running", backend_name=backend_name,
+                                 iteration=k + 1, loss=float(info["loss"]))
+
+                    job.result = hardware.spsa_sprint(
+                        track_name, weights_path, backend, iterations=iterations,
+                        shots=shots, on_iter=on_iter, stop_event=job.stop_event)
+            except Exception as exc:  # surfaced as hardware_status error by the reaper
+                job.error = f"{type(exc).__name__}: {exc}"
+
+        job.thread = threading.Thread(target=run, name=f"traqmania-hw-{msg.action}",
+                                      daemon=True)
+        self.hw_job = job
+        job.thread.start()
+
+    def _tick_hardware(self) -> None:
+        """Drain worker status messages; finalize the job once its thread exits."""
+        job = self.hw_job
+        if job is None:
+            return
+        payloads = job.drain()
+        if not job.abandoned:
+            self._outbox.extend(payloads)
+        if job.thread is not None and job.thread.is_alive():
+            return
+        self.hw_job = None
+        if job.abandoned:
+            return
+        if job.error is not None:
+            self._outbox.append({"type": "hardware_status", "phase": "error",
+                                 "message": job.error})
+        elif job.aborted or (job.result or {}).get("aborted"):
+            self._outbox.append({"type": "hardware_status", "phase": "idle",
+                                 "message": f"hardware {job.kind} aborted"})
+        elif job.kind == "lap":
+            self._finish_hardware_lap(job.result)
+        else:
+            self._outbox.append({
+                "type": "hardware_status",
+                "phase": "done",
+                "eval_return_before": float(job.result["return_before"]),
+                "eval_return_after": float(job.result["return_after"]),
+            })
+
+    def _finish_hardware_lap(self, result: dict) -> None:
+        """Emit done, then replay the recorded trajectory as a pinned ghost car
+        looping alongside a live fastsim car driving the same weights."""
+        done: dict[str, Any] = {
+            "type": "hardware_status",
+            "phase": "done",
+            "seconds_per_decision": float(result["seconds_per_decision"]),
+        }
+        if result["lapped"]:
+            done["lap_time"] = float(result["best_lap_s"])
+        self._outbox.append(done)
+        points = [[float(p[0]), float(p[1]), float(p[2])] for p in result["trajectory"]]
+        if self.mode == "hardware" and len(points) >= 2:
+            self._hw_replay = {
+                "points": points,
+                "lap_time": float(result["best_lap_s"]) if result["lapped"] else None,
+                "start_substep": self._substep,
+            }
+            self.cars = [self._make_agent_car("quantum")]  # fastsim car, same weights
+            self._outbox.append({"type": "hardware_status", "phase": "replay",
+                                 "message": "replaying hardware lap"})
+
+    def _hw_replay_payload(self) -> dict:
+        """Hardware-lap replay car, looping its 10 Hz trajectory lerped to 60 Hz."""
+        replay = self._hw_replay
+        points = replay["points"]
+        n = len(points)
+        phase = (self._substep - replay["start_substep"]) / self.substeps_per_decision
+        frac = phase - math.floor(phase)
+        i0 = int(math.floor(phase)) % n
+        p0, p1 = points[i0], points[(i0 + 1) % n]
+        dtheta = (p1[2] - p0[2] + math.pi) % (2.0 * math.pi) - math.pi  # shortest arc
+        decision_dt = self.dt * self.substeps_per_decision
+        return {
+            "id": "hardware",
+            "kind": "quantum",
+            "x": p0[0] + (p1[0] - p0[0]) * frac,
+            "y": p0[1] + (p1[1] - p0[1]) * frac,
+            "theta": p0[2] + dtheta * frac,
+            "v": math.hypot(p1[0] - p0[0], p1[1] - p0[1]) / decision_dt,
+            "lap": 0,
+            "progress": 0.0,
+            "last_lap_time": replay["lap_time"],
+            "off_track": False,
+            "ghost": True,
+            "label": "hardware lap",
+        }
+
     # -------------------------------------------------------------- simulation
 
     def tick(self) -> None:
         """Advance one 60 Hz substep; append outgoing messages to the outbox."""
         self._substep += 1
         self.t = self._substep * self.dt
+        if self.hw_job is not None:
+            self._tick_hardware()
         if self.mode == "train":
             self._tick_train()
+        elif self.mode == "hardware" and self._hw_replay is None:
+            pass  # idle car waits at the start line until a replay begins
         else:
             if (self._substep - 1) % self.substeps_per_decision == 0:
                 self._decide()
@@ -491,7 +741,8 @@ class DemoSession:
 
         for car in active:
             if car.kind == "human":
-                car.controls = keys_to_controls(self._keys)
+                car.controls = (self._analog if self._analog is not None
+                                else keys_to_controls(self._keys))
         states = np.stack([car.state for car in active])
         controls = np.array([car.controls for car in active])
         new_states = self.car_physics.step(states, controls[:, 0], controls[:, 1], controls[:, 2])
@@ -606,6 +857,8 @@ class DemoSession:
             cars = [self._car_payload(car) for car in self.cars]
             if self._ghost is not None and self.mode in ("attract", "race"):
                 cars.append(self._ghost_payload())
+            if self._hw_replay is not None and self.mode == "hardware":
+                cars.append(self._hw_replay_payload())
         self._outbox.append({"type": "state", "t": self.t, "mode": self.mode, "cars": cars})
 
     def _car_payload(self, car: _Car) -> dict:

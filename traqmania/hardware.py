@@ -52,6 +52,23 @@ _SERVICE_HELP = (
 # --------------------------------------------------------------------- backends
 
 
+def ensure_qiskit_imported() -> None:
+    """Import qiskit from the calling thread — which must be a LONG-LIVED one.
+
+    qiskit's compiled extension pins process-wide lazy state to the thread
+    that first imports it; if that thread exits, the next primitives job on
+    any other thread segfaults (observed deterministically with qiskit 2.5.0:
+    SIGSEGV in ``SparseObservable.to_sparse_list`` via
+    ``ObservablesArray.__array__`` on the SECOND hardware job of a process
+    whose first job ran on a since-exited thread). The demo server runs each
+    hardware job on a short-lived worker thread, so it calls this first from
+    the session thread, which outlives every worker. Idempotent; the first
+    call pays the one-off qiskit import cost (~1 s).
+    """
+    import qiskit  # noqa: F401
+    import qiskit_ibm_runtime  # noqa: F401
+
+
 def _fake_class_name(fake_name: str) -> str:
     """'fake_manila' -> 'FakeManilaV2' (already-camel-cased names pass through)."""
     if fake_name.startswith("Fake"):
@@ -253,6 +270,7 @@ def run_hardware_lap(
     shots: int = 1024,
     max_decisions: int | None = None,
     on_decision: Callable[[int, dict], None] | None = None,
+    stop_event: Any = None,
 ) -> dict:
     """Drive ONE car greedily with every decision evaluated on ``backend``.
 
@@ -260,8 +278,11 @@ def run_hardware_lap(
     back to ``mode=backend`` if the backend rejects Sessions) and rolls out
     until the first completed lap, the episode ending, or ``max_decisions``.
     ``on_decision(i, info)`` fires after each decision with the action taken,
-    the Q-values, the car state and per-decision latency. Returns
-    ``{lapped, best_lap_s, decisions, seconds_per_decision, trajectory, note}``.
+    the Q-values, the car state and per-decision latency. ``stop_event``
+    (optional): ``threading.Event``-like; when set, the rollout stops between
+    decisions (cooperative cancellation) and ``aborted`` is True. Returns
+    ``{lapped, best_lap_s, decisions, seconds_per_decision, trajectory,
+    aborted, note}``.
     """
     from traqmania.config import load_config
 
@@ -282,9 +303,13 @@ def run_hardware_lap(
         lapped = False
         best_lap_s: float | None = None
         decisions = 0
+        aborted = False
         t0 = time.perf_counter()
 
         for i in range(int(max_decisions)):
+            if stop_event is not None and stop_event.is_set():
+                aborted = True
+                break
             t_dec = time.perf_counter()
             q = qfunc.q_values(obs)
             action = int(np.argmax(q[0]))
@@ -322,6 +347,7 @@ def run_hardware_lap(
         "decisions": decisions,
         "seconds_per_decision": elapsed / max(1, decisions),
         "trajectory": trajectory,
+        "aborted": aborted,
         "note": note,
     }
 
@@ -398,8 +424,13 @@ def spsa_sprint(
     batch: int = 16,
     on_iter: Callable[[int, dict], None] | None = None,
     step_target: float = 0.01,
+    stop_event: Any = None,
 ) -> dict:
     """Short TD-loss SPSA fine-tune of trained weights ON the backend.
+
+    ``stop_event`` (optional): ``threading.Event``-like; when set, the SPSA
+    loop stops between iterations (cooperative cancellation) and the result
+    reflects the iterations completed so far.
 
     The expensive-but-exact parts run ONCE in fastsim (replay batch collection
     and double-DQN targets); the hardware only evaluates the MSE TD loss at the
@@ -463,6 +494,7 @@ def spsa_sprint(
             A=stability,
             seed=seed,
             callback=on_iter,
+            stop_event=stop_event,
         )
     finally:
         if session is not None:

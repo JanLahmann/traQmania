@@ -5,6 +5,7 @@ wall-clock sleeps beyond a 1 ms GIL-yield in the training smoke test).
 """
 
 import json
+import re
 import time
 
 import numpy as np
@@ -163,14 +164,42 @@ def test_race_mode_human_input_drives_car(tmp_path):
     assert kinds == {"human", "mlp"}
 
 
+def test_analog_input_overrides_keys(tmp_path):
+    session = DemoSession(load_config(), ghosts_dir=tmp_path)
+    session.handle_message(P.Race(action="start", opponent="quantum"))
+
+    # any analog field present -> keys bitmask ignored (brake bit set but not used)
+    session.handle_message(P.Input(keys=P.KEY_BRAKE, steer=-0.5, throttle=0.7))
+    for _ in range(12):
+        session.tick()
+    human = next(car for car in session.cars if car.kind == "human")
+    assert human.controls == (-0.5, 0.7, 0.0)  # absent brake axis defaults to 0.0
+    assert human.state[3] > 0.0  # analog throttle accelerated the car
+
+    # a keys-only input clears the analog override
+    session.handle_message(P.Input(keys=P.KEY_THROTTLE))
+    session.tick()
+    assert human.controls == (0.0, 1.0, 0.0)
+
+
 # ----------------------------------------------------------------- evolution
 
 
 def test_evolution_stage_specs_oval_and_fallback():
     specs = evolution_stage_specs("oval")  # bundled stage snapshots
     assert len(specs) == 4
-    assert [label for label, _ in specs] == ["ep 100", "ep 250", "ep 400", "ep 800"]
+    labels = [label for label, _ in specs]
+    assert all(re.fullmatch(r"ep \d+", label) for label in labels)
+    episodes = [int(label.split()[1]) for label in labels]
+    assert episodes == sorted(episodes) and len(set(episodes)) == 4
     assert all(path.is_file() for _, path in specs)
+    # stages are eval-selected: meta carries strictly improving (laps, -best_lap)
+    scores = []
+    for _, path in specs:
+        meta = json.loads(path.with_suffix("").with_suffix(".meta.json").read_text())
+        lap = meta["eval_best_lap"]
+        scores.append((meta["eval_laps"], -lap if lap is not None else -float("inf")))
+    assert scores == sorted(scores) and len(set(scores)) == 4
     # chicane has no stage files -> [warmstart, final] duplicated to 4 cars
     fallback = evolution_stage_specs("chicane")
     assert len(fallback) == 4
@@ -194,7 +223,7 @@ def test_evolution_mode_tick_shape(tmp_path):
     last = states[-1]["cars"]
     assert [c["id"] for c in last] == ["stage1", "stage2", "stage3", "stage4"]
     assert all(c["kind"] == "quantum" for c in last)
-    assert [c["label"] for c in last] == ["ep 100", "ep 250", "ep 400", "ep 800"]
+    assert [c["label"] for c in last] == [label for label, _ in evolution_stage_specs("oval")]
     assert all("ghost" not in c for c in last)
     assert any(c["v"] > 0.0 for c in last)
 

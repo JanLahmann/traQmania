@@ -1,0 +1,195 @@
+# Exhibiting traQmania
+
+A practical runbook for running traQmania at a booth, in a classroom, or on a
+museum kiosk. For what the science means, see [SCIENCE.md](SCIENCE.md); for
+how the system works, see [ARCHITECTURE.md](ARCHITECTURE.md).
+
+## Setups
+
+### Laptop (the simple case)
+
+```sh
+./run.sh          # venv + install + launch, opens http://127.0.0.1:8000
+```
+
+Requires Python ≥ 3.11. Everything (training included) runs locally on CPU.
+Pass server flags straight through, e.g. `./run.sh --port 8010`
+(set `TRAQMANIA_PORT=8010` too so the auto-opened browser URL matches).
+
+### Raspberry Pi (QuBins)
+
+The demo runs on a Pi 4 or Pi 5 — e.g. on [QuBins](https://qubins.org) images,
+which ship Qiskit preinstalled. Use the matching profile:
+
+```sh
+./run.sh --profile pi5     # or pi4
+```
+
+The Pi profiles lower the broadcast rate to 15 Hz and telemetry to 5 Hz and
+shrink training batches (pi4 also drops default episodes to 150). For live
+training on a Pi, always tick **Warm start** — cold training on a Pi 4 is a
+coffee break, warm-start is seconds.
+
+Or containerized (the image is multi-arch and built on a QuBins base):
+
+```sh
+docker run --rm -p 8000:8000 ghcr.io/janlahmann/traqmania
+# podman works identically:
+podman run --rm -p 8000:8000 ghcr.io/janlahmann/traqmania
+```
+
+To use a profile inside the container, override the command:
+
+```sh
+docker run --rm -p 8000:8000 ghcr.io/janlahmann/traqmania \
+  python -m traqmania --host 0.0.0.0 --port 8000 --profile pi5
+```
+
+### Kiosk / exhibition mode
+
+```sh
+./run.sh --profile exhibition
+```
+
+The `exhibition` profile (`traqmania/config/exhibition.toml`):
+
+- binds `0.0.0.0` — the UI is reachable from other devices on the LAN
+  (visitors' phones can watch);
+- `attract_idle_seconds = 20` — the client returns to attract mode after 20 s
+  without keyboard/mouse activity, so the exhibit never sits on a stale
+  screen (default is 45 s; set `0` to disable);
+- `kiosk = true` — larger captions, hidden mouse cursor.
+
+Profiles stack with an extra overlay via `--config <file.toml>`, and any
+`./config/<name>.toml` in the working directory shadows the packaged profile
+of the same name — so a Pi kiosk is `./run.sh --profile pi5 --config
+traqmania/config/exhibition.toml`. Run the browser fullscreen, e.g.
+`chromium-browser --kiosk http://localhost:8000`.
+
+## The 5-minute demo
+
+A narrative that works cold, in order. Controls for the race segment:
+**arrow keys or WASD** (up/W throttle, down/S brake, left/right steer).
+
+1. **Attract — "this driver is a quantum circuit"** (~1 min).
+   The screen already shows it: a car lapping, four wobbling gauges, a
+   circuit diagram. Say: *"Every tenth of a second, the car's three distance
+   sensors and its speed are encoded into rotations on 4 qubits; the four
+   ⟨Z⟩ readouts you see on the gauges become the four action values — the
+   biggest one steers the car."* Point at a corner: watch the brake action
+   win just before the hairpin.
+
+2. **Train — "watch it learn its first lap in seconds"** (~1 min).
+   Mode **Train** → agent *Quantum* → tick **Warm start** → *Start
+   training*. Eight cars flail, the return curve climbs, and the first clean
+   lap lands in a couple of seconds (measured 1.4–2.8 s on oval); the
+   best-lap banner fires as laps keep improving. Mention: *"This is real
+   double-DQN training against a simulated version of the circuit — the same
+   math IBM's 2020 quantum-RL paper used."* (Without warm start a full cold
+   run on oval is ~11 s to the first clean lap — still demoable; on a Pi,
+   warm only.)
+
+3. **Evolution — "the same circuit at four ages"** (~30 s).
+   Mode **Evolution**: four cars drive weights snapshotted at increasing
+   points of one training run — the labels show how many episodes each has
+   trained ("ep N"). The youngest car wobbles and crashes; the oldest is
+   smooth. One picture of what training buys.
+
+4. **Race — "beat the quantum driver"** (~1.5 min).
+   Mode **Race**, opponent *Quantum*, hand over the keyboard. Going off
+   track freezes the visitor's car for a second, then respawns it; the ghost
+   car is the all-time best lap on this machine. Most first-timers lose —
+   that lands the point better than any slide.
+
+5. **Hardware — "and now on a (fake) quantum device"** (~1 min).
+   Mode **Hardware**, backend *fake*, run a **lap**: every steering decision
+   is now an `EstimatorV2` job against a local twin of a real 5-qubit IBM
+   device — noise model, coupling map, per-decision latency and all. Watch
+   the status pill walk through connecting → transpiling → running, then the
+   lap replays next to a simulator car driving the same weights. Say:
+   *"Same circuit, same weights — the only change is who executes it. With
+   an IBM Quantum token this exact flow runs on a physical device."*
+
+## Per-mode talking points
+
+- **Watch (attract):** 4 qubits, 4 layers, 56 trainable parameters — of which
+  4 are provably dead (a fun aside for physicists: the final RZ commutes with
+  the Z measurement). Gauges are live ⟨Z_a⟩; bars are Q-values after the
+  trained output head. The circuit diagram is the actual gate sequence.
+- **Train:** double DQN, epsilon-greedy, replay buffer — the classical RL
+  recipe, with the neural network swapped for a quantum circuit. Choosing
+  *Both* races quantum vs MLP learning curves live. Honest line: *"similar
+  learning, no speedup — the interesting part is that a 56-parameter quantum
+  model does this at all."*
+- **Evolution:** all four cars run the identical architecture; only the
+  training episode count differs. Labels show "ep N".
+- **Race:** the agent decides 10 times per second and gets exactly the same
+  observation a human gets from the screen: three distance rays and speed.
+  Clean laps that beat the record become the new ghost.
+- **Hardware:** inference on hardware, training on simulator — one gradient
+  step is ~3.4 ms simulated vs ~20.5 s with circuit-evaluation gradients
+  (before queue time!). The *sprint* action shows the middle path: SPSA
+  fine-tuning at 2 quantum jobs per iteration, whatever the parameter count.
+
+## Hardware-mode prerequisites
+
+- Install the hardware extra (not needed for anything else):
+
+  ```sh
+  pip install -e ".[hardware]"     # qiskit-ibm-runtime
+  ```
+
+- **Fake backend: nothing else.** It is a local `FakeBackendV2` — the noise
+  model and coupling map of a retired 5-qubit IBM device, simulated on your
+  machine. No account, no network, exhibition-safe.
+- **Real backend:** an IBM Quantum account. Create a token at
+  [quantum.cloud.ibm.com](https://quantum.cloud.ibm.com), then either
+  `export QISKIT_IBM_TOKEN=<token>` before starting the server, or save it
+  once with `QiskitRuntimeService.save_account(channel="ibm_quantum_platform",
+  token=...)`. Expect **minutes-to-hours of queue time** and seconds per
+  decision — for a booth, run the fake backend live and mention the real one;
+  or pre-run the CLI and show the transcript:
+
+  ```sh
+  python -m traqmania.hardware lap --track oval --fake        # dry-run flow
+  python -m traqmania.hardware lap --track oval               # real device
+  python -m traqmania.hardware sprint --track oval --fake --iterations 20
+  ```
+
+- Never paste a token into a notebook or config file that might get
+  committed.
+
+## Troubleshooting
+
+**Port already in use** (`[Errno 48] address already in use`): a previous
+instance is still running. `lsof -ti:8000 | xargs kill`, or start on another
+port: `./run.sh --port 8010`.
+
+**Status pill stuck on "reconnecting…":** the browser lost the websocket. The
+client auto-reconnects with backoff (0.5 s → 8 s), so if the server is up it
+recovers by itself — if it stays stuck, the server process died: check the
+terminal, `curl http://127.0.0.1:8000/health`, and restart `./run.sh`. When
+serving other devices, remember plain `./run.sh` binds `127.0.0.1` only — use
+the exhibition profile or `--host 0.0.0.0`.
+
+**Choppy rendering / sluggish Pi:** use the right profile (`--profile pi4` or
+`pi5` — lower broadcast/telemetry rates, smaller training batches). Train
+warm-start only, keep episodes modest, and prefer oval/chicane; gp is the
+heavyweight track (cold training takes ~2000 episodes). Close other browser
+tabs — the canvas renderer is cheap but not free.
+
+**"training is already running" / "cannot change track while training is
+running":** press **Stop** on the Training tab first; track switches and new
+runs are blocked while a job is live.
+
+**Resetting ghosts:** the best-lap ghost per track lives in
+`traqmania/data/ghosts/<track>.json` and is overwritten whenever anyone —
+including a talented visitor — beats it with a clean lap. To reset to the
+bundled records in a git checkout: `git checkout -- traqmania/data/ghosts/`.
+To simply clear one: delete the file and restart (no ghost is shown until a
+new clean lap is driven). In a container, ghosts reset with the container.
+
+**Hardware mode fails immediately:** with backend *real*, the server needs
+`QISKIT_IBM_TOKEN` (see prerequisites); the error message contains the setup
+steps. With *fake*, check that `qiskit-ibm-runtime` is installed
+(`pip install -e ".[hardware]"`).

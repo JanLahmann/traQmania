@@ -11,13 +11,16 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
-MODES = ("attract", "train", "race", "evolution")
+MODES = ("attract", "train", "race", "evolution", "hardware")
 TRAIN_AGENTS = ("quantum", "mlp", "both")
 OPPONENTS = ("quantum", "mlp")
 TRAIN_ACTIONS = ("start", "stop")
 RACE_ACTIONS = ("start", "reset")
 CAR_KINDS = ("human", "quantum", "mlp")
 EVENT_KINDS = ("lap", "crash", "clean_lap", "training_done", "new_best_lap")
+HARDWARE_ACTIONS = ("lap", "sprint", "abort")
+HARDWARE_BACKENDS = ("fake", "real")
+HARDWARE_PHASES = ("idle", "connecting", "transpiling", "running", "replay", "done", "error")
 
 # input.keys bitmask
 KEY_THROTTLE, KEY_BRAKE, KEY_LEFT, KEY_RIGHT = 1, 2, 4, 8
@@ -38,7 +41,14 @@ class Hello:
 
 @dataclass(frozen=True)
 class Input:
+    """Human controls. ``keys`` is always required; when ANY of the optional
+    analog axes is present the server drives from them instead of the bitmask
+    (missing axes default to 0.0 — clients send ``keys: 0`` alongside)."""
+
     keys: int
+    steer: float | None = None  # clamped to [-1, 1] at parse time
+    throttle: float | None = None  # clamped to [0, 1]
+    brake: float | None = None  # clamped to [0, 1]
     TYPE: ClassVar[str] = "input"
 
 
@@ -70,6 +80,23 @@ class Race:
     opponent: str
     track: str | None = None
     TYPE: ClassVar[str] = "race"
+
+
+@dataclass(frozen=True)
+class HardwareMsg:
+    """Run the quantum policy on IBM hardware (or its local fake twin).
+
+    ``iterations`` only applies to ``action="sprint"`` (SPSA iterations).
+    ``max_decisions`` only applies to ``action="lap"``: caps the rollout at N
+    backend decisions (test-friendly; default is the env episode cap).
+    """
+
+    action: str  # "lap" | "sprint" | "abort"
+    backend: str  # "fake" | "real"
+    iterations: int | None = None
+    shots: int | None = None
+    max_decisions: int | None = None
+    TYPE: ClassVar[str] = "hardware"
 
 
 # ------------------------------------------------------------- server -> client
@@ -148,6 +175,23 @@ class Event:
 
 
 @dataclass(frozen=True)
+class HardwareStatus:
+    """Progress of a hardware lap/sprint job (all optionals omitted when None)."""
+
+    phase: str  # one of HARDWARE_PHASES
+    backend_name: str | None = None
+    message: str | None = None
+    decision: int | None = None  # lap: decisions completed so far
+    seconds_per_decision: float | None = None
+    iteration: int | None = None  # sprint: SPSA iterations completed so far
+    loss: float | None = None
+    eval_return_before: float | None = None
+    eval_return_after: float | None = None
+    lap_time: float | None = None
+    TYPE: ClassVar[str] = "hardware_status"
+
+
+@dataclass(frozen=True)
 class Error:
     message: str
     TYPE: ClassVar[str] = "error"
@@ -158,10 +202,15 @@ class Error:
 # Optional fields dropped from the wire when None (nullable-but-required fields
 # like telemetry.loss and car.last_lap_time stay as explicit nulls).
 _OMIT_IF_NONE: dict[str, set[str]] = {
+    Input.TYPE: {"steer", "throttle", "brake"},
     Train.TYPE: {"track", "episodes"},
     Race.TYPE: {"track"},
+    HardwareMsg.TYPE: {"iterations", "shots", "max_decisions"},
     Event.TYPE: {"car_id", "lap_time", "agent"},
     Telemetry.TYPE: {"best_lap_s", "lap_times"},
+    HardwareStatus.TYPE: {"backend_name", "message", "decision", "seconds_per_decision",
+                          "iteration", "loss", "eval_return_before", "eval_return_after",
+                          "lap_time"},
     CarState.__name__: {"rays", "label", "ghost"},
 }
 
@@ -259,9 +308,21 @@ def _parse_hello(d: dict) -> Hello:
     return Hello()
 
 
+def _clamped_float(d: dict, key: str, lo: float, hi: float) -> float | None:
+    """Optional analog axis: validated as a number, then clamped to [lo, hi]."""
+    if d.get(key) is None:
+        return None
+    return min(hi, max(lo, _float(d[key], key)))
+
+
 def _parse_input(d: dict) -> Input:
-    _check_extra(d, {"keys"})
-    return Input(keys=_int(_req(d, "keys"), "keys", 0, KEYS_ALL))
+    _check_extra(d, {"keys", "steer", "throttle", "brake"})
+    return Input(
+        keys=_int(_req(d, "keys"), "keys", 0, KEYS_ALL),
+        steer=_clamped_float(d, "steer", -1.0, 1.0),
+        throttle=_clamped_float(d, "throttle", 0.0, 1.0),
+        brake=_clamped_float(d, "brake", 0.0, 1.0),
+    )
 
 
 def _parse_set_mode(d: dict) -> SetMode:
@@ -294,6 +355,19 @@ def _parse_race(d: dict) -> Race:
     )
 
 
+def _parse_hardware(d: dict) -> HardwareMsg:
+    _check_extra(d, {"action", "backend", "iterations", "shots", "max_decisions"})
+    return HardwareMsg(
+        action=_enum(_req(d, "action"), "action", HARDWARE_ACTIONS),
+        backend=_enum(_req(d, "backend"), "backend", HARDWARE_BACKENDS),
+        iterations=_int(d["iterations"], "iterations", 1)
+        if d.get("iterations") is not None else None,
+        shots=_int(d["shots"], "shots", 1) if d.get("shots") is not None else None,
+        max_decisions=_int(d["max_decisions"], "max_decisions", 1)
+        if d.get("max_decisions") is not None else None,
+    )
+
+
 _CLIENT_PARSERS = {
     Hello.TYPE: _parse_hello,
     Input.TYPE: _parse_input,
@@ -301,10 +375,11 @@ _CLIENT_PARSERS = {
     SetTrack.TYPE: _parse_set_track,
     Train.TYPE: _parse_train,
     Race.TYPE: _parse_race,
+    HardwareMsg.TYPE: _parse_hardware,
 }
 
 
-def parse_client(data: Any) -> Hello | Input | SetMode | SetTrack | Train | Race:
+def parse_client(data: Any) -> Hello | Input | SetMode | SetTrack | Train | Race | HardwareMsg:
     """Strictly parse a client -> server dict; raises ProtocolError on anything off."""
     if not isinstance(data, dict):
         raise ProtocolError("message must be a JSON object")
@@ -400,6 +475,26 @@ def _parse_error(d: dict) -> Error:
     return Error(message=_str(_req(d, "message"), "message"))
 
 
+def _opt_int(d: dict, key: str, lo: int | None = None) -> int | None:
+    return _int(d[key], key, lo) if d.get(key) is not None else None
+
+
+def _parse_hardware_status(d: dict) -> HardwareStatus:
+    return HardwareStatus(
+        phase=_enum(_req(d, "phase"), "phase", HARDWARE_PHASES),
+        backend_name=_str(d["backend_name"], "backend_name")
+        if d.get("backend_name") is not None else None,
+        message=_str(d["message"], "message") if d.get("message") is not None else None,
+        decision=_opt_int(d, "decision", 0),
+        seconds_per_decision=_opt_float(d, "seconds_per_decision"),
+        iteration=_opt_int(d, "iteration", 0),
+        loss=_opt_float(d, "loss"),
+        eval_return_before=_opt_float(d, "eval_return_before"),
+        eval_return_after=_opt_float(d, "eval_return_after"),
+        lap_time=_opt_float(d, "lap_time"),
+    )
+
+
 _SERVER_PARSERS = {
     Welcome.TYPE: _parse_welcome,
     TrackMsg.TYPE: _parse_track_msg,
@@ -407,11 +502,14 @@ _SERVER_PARSERS = {
     Quantum.TYPE: _parse_quantum,
     Telemetry.TYPE: _parse_telemetry,
     Event.TYPE: _parse_event,
+    HardwareStatus.TYPE: _parse_hardware_status,
     Error.TYPE: _parse_error,
 }
 
 
-def parse_server(data: Any) -> Welcome | TrackMsg | State | Quantum | Telemetry | Event | Error:
+def parse_server(
+    data: Any,
+) -> Welcome | TrackMsg | State | Quantum | Telemetry | Event | HardwareStatus | Error:
     """Parse a server -> client dict (used by tests and client tooling)."""
     if not isinstance(data, dict):
         raise ProtocolError("message must be a JSON object")

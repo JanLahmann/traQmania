@@ -13,9 +13,10 @@ Exercises the full pinned protocol: welcome payload, attract mode (moving
 quantum car + quantum introspection messages), evolution mode (labelled
 training-stage cars), set_track, MLP training to completion, warm-started
 quantum training with lap telemetry (lap_times / best_lap_s / new_best_lap),
-a human-vs-quantum race with keyboard input and reset, and the best-lap
-ghost car in attract mode.  Skipped under plain ``pytest`` (it needs a
-running server and takes minutes); CI ignores it.
+a human-vs-quantum race with keyboard input, analog (gamepad-style) input and
+reset, hardware mode (fake-backend lap with replay ghost + SPSA sprint), and
+the best-lap ghost car in attract mode.  Skipped under plain ``pytest`` (it
+needs a running server and takes minutes); CI ignores it.
 """
 
 from __future__ import annotations
@@ -290,6 +291,108 @@ async def verify_race(c: Client) -> None:
     print("  ok: race flow complete")
 
 
+async def verify_race_analog(c: Client) -> None:
+    print("[ws] race vs quantum: analog input (steer 1.0, throttle 1.0, keys 0) moves the car")
+    await c.send(type="race", action="start", opponent="quantum")
+    first = await c.wait_for(
+        lambda m: m["type"] == "state" and m["mode"] == "race"
+        and car_by_kind(m, "human") is not None,
+        timeout=30, desc="race state with human car")
+    human0 = car_by_kind(first, "human")
+    await c.send(type="input", keys=0, steer=1.0, throttle=1.0)
+    states = [m for m in await c.collect(2.0)
+              if m["type"] == "state" and m["mode"] == "race"]
+    check(len(states) >= 10, f"race states streaming ({len(states)} in 2s)")
+    humans = [h for h in (car_by_kind(s, "human") for s in states) if h is not None]
+    moved = max(abs(h["x"] - human0["x"]) + abs(h["y"] - human0["y"]) for h in humans)
+    check(moved > 0.5, f"human car moved under analog steer+throttle ({moved:.2f} units)")
+    check(any(h["v"] > 0.1 for h in humans), "human car gained speed from analog throttle")
+    turned = max(abs(h["theta"] - human0["theta"]) for h in humans)
+    check(turned > 0.05, f"human car heading changed under analog steer ({turned:.2f} rad)")
+    await c.send(type="input", keys=0)  # release: back to (all-zero) keyboard controls
+    print("  ok: analog input drives the human car")
+
+
+class HardwareWatch:
+    """Accumulates hardware_status messages while waiting for a target phase."""
+
+    def __init__(self) -> None:
+        self.statuses: list[dict] = []
+
+    def until(self, *phases: str):
+        def predicate(m: dict) -> bool:
+            if m["type"] != "hardware_status":
+                return False
+            self.statuses.append(m)
+            if m["phase"] == "error" and "error" not in phases:
+                raise AssertionError(f"hardware_status error: {m.get('message')}")
+            return m["phase"] in phases
+        return predicate
+
+    def phases(self) -> list[str]:
+        return [s["phase"] for s in self.statuses]
+
+
+async def verify_hardware_lap(c: Client) -> None:
+    print("[ws] hardware mode: fake-backend lap (25 decisions) with replay ghost")
+    await c.send(type="set_mode", mode="hardware")
+    idle = await c.wait_for(
+        lambda m: m["type"] == "hardware_status" and m["phase"] == "idle",
+        timeout=30, desc="hardware_status idle after set_mode hardware")
+    check(idle["phase"] == "idle", "entering hardware mode reports phase idle")
+    state = await c.wait_for(
+        lambda m: m["type"] == "state" and m["mode"] == "hardware",
+        timeout=30, desc="hardware-mode state")
+    check(car_by_kind(state, "quantum") is not None, "idle fastsim quantum car present")
+
+    await c.send(type="hardware", action="lap", backend="fake", shots=128, max_decisions=25)
+    watch = HardwareWatch()
+    # generous timeout: the first fake-backend transpile alone can take minutes
+    await c.wait_for(watch.until("done"), timeout=600,
+                     desc="hardware lap phases reaching done")
+    phases = watch.phases()
+    for expected in ("connecting", "transpiling", "running", "done"):
+        check(expected in phases, f"hardware lap reached phase '{expected}'")
+    order = [phases.index(p) for p in ("connecting", "transpiling", "running", "done")]
+    check(order == sorted(order), f"lap phases arrive in order ({phases})")
+    running = [s for s in watch.statuses if s["phase"] == "running"]
+    check(running[0].get("decision", 0) >= 1, "running status carries decision counter")
+    check(running[0].get("seconds_per_decision", 0) > 0, "running status carries s/decision")
+    check(bool(running[0].get("backend_name")), "running status carries backend_name")
+
+    replay = await c.wait_for(
+        lambda m: m["type"] == "state" and m["mode"] == "hardware"
+        and any(car["id"] == "hardware" for car in m["cars"]),
+        timeout=60, desc="state with hardware replay car")
+    hw = next(car for car in replay["cars"] if car["id"] == "hardware")
+    check(hw.get("ghost") is True and hw["kind"] == "quantum"
+          and hw.get("label") == "hardware lap",
+          "replay car is {id:hardware, kind:quantum, ghost:true, label:'hardware lap'}")
+    check(car_by_kind(replay, "quantum") is not None,
+          "fastsim comparison car drives alongside the hardware ghost")
+    print("  ok: hardware lap ran on the fake backend and replays in the race canvas")
+
+
+async def verify_hardware_sprint(c: Client) -> None:
+    print("[ws] hardware mode: SPSA sprint (2 iterations) on the fake backend")
+    await c.send(type="hardware", action="sprint", backend="fake",
+                 iterations=2, shots=128)
+    watch = HardwareWatch()
+    await c.wait_for(watch.until("done"), timeout=600,
+                     desc="hardware sprint phases reaching done")
+    running = [s for s in watch.statuses if s["phase"] == "running"]
+    check([s.get("iteration") for s in running] == [1, 2],
+          f"sprint reports iterations 1..2 ({[s.get('iteration') for s in running]})")
+    check(all("loss" in s for s in running), "sprint running statuses carry loss")
+    done = next(s for s in watch.statuses if s["phase"] == "done")
+    check(isinstance(done.get("eval_return_before"), (int, float)),
+          f"done carries eval_return_before ({done.get('eval_return_before')})")
+    check(isinstance(done.get("eval_return_after"), (int, float)),
+          f"done carries eval_return_after ({done.get('eval_return_after')})")
+    print(f"  ok: sprint done, eval return {done['eval_return_before']:.1f} -> "
+          f"{done['eval_return_after']:.1f}")
+
+
 def _inject_ghost_file(track: dict) -> None:
     """Write a synthetic best-lap ghost for a track from its centerline."""
     pts = track["centerline"]
@@ -357,6 +460,9 @@ async def drive(port: int) -> None:
         await verify_train_mlp(c, episodes=10)
         await verify_train_quantum_warm(c, episodes=60)
         await verify_race(c)
+        await verify_race_analog(c)
+        await verify_hardware_lap(c)
+        await verify_hardware_sprint(c)
         await verify_attract_ghost(c)
         await c.send(type="set_mode", mode="attract")  # leave the kiosk in attract
     print("\nALL E2E CHECKS PASSED")

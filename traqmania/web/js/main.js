@@ -8,6 +8,7 @@ import { renderCircuit } from "./circuit.js";
 import { TrainingChart, LapChart } from "./charts.js";
 import { AttractManager } from "./attract.js";
 import { initExplain } from "./explain.js";
+import { initHardwarePanel } from "./hardware-panel.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -40,7 +41,12 @@ const attract = new AttractManager({
 });
 
 initExplain($("#panel-explain"));
-initInput(() => attract.notifyActivity());
+const hardwarePanel = initHardwarePanel();
+initInput(() => attract.notifyActivity(), {
+  onGamepadChange: (connected) => {
+    $("#gamepad-pill").hidden = !connected;
+  },
+});
 
 // -- helpers -----------------------------------------------------------------
 
@@ -84,6 +90,7 @@ function applyMode(mode) {
   }
   renderEpisodeOverlay();
   if (mode === "train") selectTab("training");
+  else if (mode === "hardware") selectTab("hardware");
   else if (mode === "attract" || mode === "evolution") selectTab("quantum");
 }
 
@@ -237,6 +244,8 @@ net.on("state", (msg) => {
 
 net.on("quantum", (msg) => quantumPanel.update(msg));
 
+net.on("hardware_status", (msg) => hardwarePanel.handleStatus(msg));
+
 net.on("telemetry", (msg) => {
   chart.addPoint(msg.agent, msg.episode, msg.mean_return, msg.epsilon);
   if (msg.lap_times !== undefined || msg.best_lap_s != null) {
@@ -294,6 +303,7 @@ const MODE_FOR_BUTTON = {
   train: "train",
   evolution: "evolution",
   race: "race",
+  hardware: "hardware",
 };
 
 for (const btn of document.querySelectorAll(".mode-btn")) {

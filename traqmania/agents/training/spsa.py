@@ -23,6 +23,7 @@ with the stability offset ``A`` defaulting to ``iterations / 10``.
 from __future__ import annotations
 
 from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -36,6 +37,7 @@ def minimize(
     A: float | None = None,
     seed: int | None = 0,
     callback: Callable[[int, dict], None] | None = None,
+    stop_event: Any = None,
 ) -> dict:
     """Minimize ``f`` with SPSA; exactly ``2 * iterations`` evaluations of ``f``.
 
@@ -43,7 +45,9 @@ def minimize(
     ``loss_history[k]`` is the mean of the two evaluations at iteration ``k``
     (an unbiased smoothed estimate of ``f`` near the current iterate).
     ``callback(k, info)`` receives ``x``, ``loss``, ``f_plus``, ``f_minus``,
-    ``a_k`` and ``c_k`` after each iteration.
+    ``a_k`` and ``c_k`` after each iteration.  ``stop_event`` (optional):
+    ``threading.Event``-like; when set, the loop returns early between
+    iterations (cooperative cancellation).
     """
     x = np.asarray(x0, dtype=np.float64).copy()
     if A is None:
@@ -52,6 +56,8 @@ def minimize(
 
     loss_history: list[float] = []
     for k in range(int(iterations)):
+        if stop_event is not None and stop_event.is_set():
+            break
         a_k = a / (k + 1 + A) ** 0.602
         c_k = c / (k + 1) ** 0.101
         delta = rng.choice(np.array([-1.0, 1.0]), size=x.shape)

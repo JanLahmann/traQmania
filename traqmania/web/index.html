@@ -15,6 +15,7 @@
       <button data-mode="train" class="mode-btn">Train</button>
       <button data-mode="evolution" class="mode-btn">Evolution</button>
       <button data-mode="race" class="mode-btn">Race</button>
+      <button data-mode="hardware" class="mode-btn">Hardware</button>
     </nav>
 
     <label class="track-picker">
@@ -35,6 +36,7 @@
     </div>
 
     <div class="spacer"></div>
+    <div id="gamepad-pill" class="pill pill-pad" hidden>🎮 controller active</div>
     <div id="status-pill" class="pill pill-off">connecting…</div>
   </header>
 
@@ -51,6 +53,7 @@
       <nav class="tabs" id="sidebar-tabs" aria-label="Panels">
         <button data-tab="quantum" class="tab-btn active">Quantum</button>
         <button data-tab="training" class="tab-btn">Training</button>
+        <button data-tab="hardware" class="tab-btn">Hardware</button>
         <button data-tab="explain" class="tab-btn">Explain</button>
       </nav>
 
@@ -95,6 +98,51 @@
         <h2>Lap times</h2>
         <canvas id="lap-chart" width="340" height="160"></canvas>
         <div id="train-stats"></div>
+      </div>
+
+      <div class="panel" id="panel-hardware">
+        <h2>Real quantum hardware</h2>
+        <p class="hint">Run the trained circuit on an IBM Quantum backend.
+        <em>Simulated device</em> is a local noisy simulation of a real device
+        — results in seconds. <em>Real IBM Quantum</em> submits jobs to an
+        actual quantum computer: expect a queue and several minutes.</p>
+        <form id="hw-form">
+          <label>
+            <span>Backend</span>
+            <select id="hw-backend">
+              <option value="fake">Simulated device (fake)</option>
+              <option value="real">Real IBM Quantum</option>
+            </select>
+          </label>
+          <label>
+            <span>Shots</span>
+            <input id="hw-shots" type="number" min="128" max="8192" step="128" value="1024">
+          </label>
+          <label>
+            <span>Iterations (sprint)</span>
+            <input id="hw-iterations" type="number" min="1" max="100" step="1" value="10">
+          </label>
+          <div class="btn-row hw-btn-row">
+            <button type="button" id="hw-lap" class="accent-btn">Run hardware lap</button>
+            <button type="button" id="hw-sprint" class="accent-btn">SPSA training sprint</button>
+            <button type="button" id="hw-abort" disabled>Abort</button>
+          </div>
+        </form>
+        <h2>Status</h2>
+        <div class="hw-status-row">
+          <span id="hw-phase" class="pill pill-idle">idle</span>
+          <span id="hw-backend-name" class="hw-backend-name"></span>
+        </div>
+        <div id="hw-message" class="hint"></div>
+        <div id="hw-counters"></div>
+        <div id="hw-eval"></div>
+        <div id="hw-replay-caption" class="hint" hidden>
+          Replay: the <em>hardware lap</em> ghost drives the decisions made on
+          the quantum backend, next to a simulator car running the same
+          weights for comparison.
+        </div>
+        <h2>Sprint loss</h2>
+        <canvas id="hw-loss-chart" width="340" height="160"></canvas>
       </div>
 
       <div class="panel" id="panel-explain"></div>

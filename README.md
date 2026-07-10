@@ -66,7 +66,24 @@ noise (`aer_noisy`).
   and the circuit diagram update as it decides.
 - **Train**: watch quantum and classical agents learn side-by-side (warm-start mode
   reaches a first clean lap in seconds).
-- **Race**: arrow keys / WASD — race the quantum agent.
+- **Race**: arrow keys / WASD or a gamepad (analog steering, trigger
+  throttle/brake) — race the quantum agent.
+- **Evolution**: four training snapshots of the same quantum agent (episodes
+  350/450/550/700, each verified better than the last) race each other — watch
+  the policy improve across checkpoints.
+- **Hardware**: run a lap or a bounded SPSA fine-tune sprint on an IBM Quantum
+  backend (or a local fake backend) with live status, then replay the hardware
+  lap as a ghost. Needs the `[hardware]` extra and a saved IBM Quantum account —
+  see the [exhibition runbook](docs/EXHIBITION.md).
 
-*Work in progress — quantum hardware mode (IBM Quantum lap + SPSA fine-tune sprint)
-in the web UI is next.*
+## Documentation
+
+- [Exhibition runbook](docs/EXHIBITION.md) — laptop/Pi/kiosk setups, a scripted
+  5-minute demo, per-mode talking points, hardware-mode prerequisites,
+  troubleshooting.
+- [Architecture](docs/ARCHITECTURE.md) — system overview, module map, the
+  complete WebSocket protocol reference, data-flow rates, and how to add a
+  track / agent / mode.
+- [The science](docs/SCIENCE.md) — the circuit, algorithm lineage, training
+  and hardware approach, measured results, and what this demo does *not* claim.
+- [Notebooks](#notebooks) — the five-part build-it-from-scratch course above.

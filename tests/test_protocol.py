@@ -8,15 +8,22 @@ CLIENT_MSGS = [
     P.Hello(),
     P.Input(keys=0),
     P.Input(keys=P.KEYS_ALL),
+    P.Input(keys=0, steer=-0.5, throttle=1.0, brake=0.0),
+    P.Input(keys=0, steer=0.25),
     P.SetMode(mode="attract"),
     P.SetMode(mode="train"),
     P.SetMode(mode="evolution"),
+    P.SetMode(mode="hardware"),
     P.SetTrack(track="gp"),
     P.Train(action="start", agent="both", track="gp", warm=True, episodes=100),
     P.Train(action="start", agent="quantum"),
     P.Train(action="stop", agent="mlp"),
     P.Race(action="start", opponent="quantum", track="oval"),
     P.Race(action="reset", opponent="mlp"),
+    P.HardwareMsg(action="lap", backend="fake", shots=256, max_decisions=10),
+    P.HardwareMsg(action="lap", backend="real"),
+    P.HardwareMsg(action="sprint", backend="fake", iterations=5, shots=128),
+    P.HardwareMsg(action="abort", backend="fake"),
 ]
 
 SERVER_MSGS = [
@@ -56,6 +63,21 @@ SERVER_MSGS = [
     P.Event(kind="new_best_lap", car_id="human", lap_time=17.5),
     P.Event(kind="new_best_lap", agent="quantum", lap_time=18.1),
     P.Error(message="boom"),
+    P.HardwareStatus(phase="idle"),
+    P.HardwareStatus(phase="connecting", message="connecting to IBM Quantum"),
+    P.HardwareStatus(phase="transpiling", backend_name="fake_manila"),
+    P.HardwareStatus(phase="running", backend_name="ibm_torino", decision=12,
+                     seconds_per_decision=3.4),
+    P.HardwareStatus(phase="running", iteration=7, loss=0.42),
+    P.HardwareStatus(phase="done", lap_time=17.2, seconds_per_decision=2.1),
+    P.HardwareStatus(phase="done", eval_return_before=51.0, eval_return_after=63.5),
+    P.HardwareStatus(phase="replay", message="replaying hardware lap"),
+    P.HardwareStatus(phase="error", message="no IBM Quantum account"),
+    P.State(t=3.0, mode="hardware", cars=[
+        P.CarState(id="hardware", kind="quantum", x=1.0, y=2.0, theta=0.1, v=3.0,
+                   lap=0, progress=0.0, last_lap_time=17.2, off_track=False,
+                   label="hardware lap", ghost=True),
+    ]),
 ]
 
 
@@ -95,6 +117,33 @@ def test_optional_none_fields_omitted_from_wire():
     assert "best_lap_s" not in wire and "lap_times" not in wire
 
 
+def test_input_analog_fields_clamped_and_omitted():
+    # out-of-range analog values are clamped, not rejected
+    msg = P.parse_client({"type": "input", "keys": 0,
+                          "steer": -3.5, "throttle": 2.0, "brake": -0.25})
+    assert (msg.steer, msg.throttle, msg.brake) == (-1.0, 1.0, 0.0)
+    # keys-only input carries no analog fields on the wire
+    wire = P.serialize(P.Input(keys=P.KEY_THROTTLE))
+    assert set(wire) == {"type", "keys"}
+    # partial analog: absent axes stay None (server defaults them to 0.0)
+    msg = P.parse_client({"type": "input", "keys": 0, "steer": 0.5})
+    assert msg.steer == 0.5 and msg.throttle is None and msg.brake is None
+
+
+def test_hardware_msg_and_status_optional_fields_omitted():
+    wire = P.serialize(P.HardwareMsg(action="abort", backend="fake"))
+    assert set(wire) == {"type", "action", "backend"}
+    wire = P.serialize(P.HardwareStatus(phase="idle"))
+    assert set(wire) == {"type", "phase"}
+    wire = P.serialize(P.HardwareStatus(phase="running", decision=3,
+                                        seconds_per_decision=2.5))
+    assert set(wire) == {"type", "phase", "decision", "seconds_per_decision"}
+    with pytest.raises(P.ProtocolError):
+        P.parse_server({"type": "hardware_status", "phase": "warming_up"})
+    with pytest.raises(P.ProtocolError):
+        P.parse_server({"type": "hardware_status"})
+
+
 def test_telemetry_lap_times_validation():
     base = {"type": "telemetry", "agent": "mlp", "episode": 0, "mean_return": 0.0,
             "epsilon": 1.0, "loss": None, "returns_tail": []}
@@ -130,6 +179,16 @@ GARBAGE = [
     {"type": "race", "action": "start", "opponent": "both"},  # 'both' invalid here
     {"type": "race", "action": "go", "opponent": "mlp"},
     {"type": "race", "action": "start"},               # missing opponent
+    {"type": "input", "keys": 0, "steer": "left"},     # analog must be numeric
+    {"type": "input", "keys": 0, "throttle": True},    # bool is not a number
+    {"type": "input", "steer": 0.5},                   # keys stays required
+    {"type": "hardware", "action": "lap"},             # missing backend
+    {"type": "hardware", "action": "warp", "backend": "fake"},
+    {"type": "hardware", "action": "lap", "backend": "aer"},
+    {"type": "hardware", "action": "sprint", "backend": "fake", "iterations": 0},
+    {"type": "hardware", "action": "lap", "backend": "fake", "shots": "many"},
+    {"type": "hardware", "action": "lap", "backend": "fake", "max_decisions": 0},
+    {"type": "hardware", "action": "lap", "backend": "fake", "unknown": 1},
 ]
 
 

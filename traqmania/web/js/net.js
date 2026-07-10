@@ -86,7 +86,9 @@ export function send(type, payload = {}) {
 
 // -- typed helpers, one per C->S protocol message ---------------------------
 
-export const sendInput = (keys) => send("input", { keys });
+/** `analog` (optional): { steer:[-1,1], throttle:[0,1], brake:[0,1] } — when
+ *  present the server uses these instead of the keys bitmask (send keys:0). */
+export const sendInput = (keys, analog) => send("input", analog ? { keys, ...analog } : { keys });
 export const setMode = (mode) => send("set_mode", { mode });
 export const setTrack = (track) => send("set_track", { track });
 
@@ -102,4 +104,13 @@ export function raceCmd(action, opponent, track) {
   const msg = { action, opponent };
   if (track !== undefined) msg.track = track;
   return send("race", msg);
+}
+
+/** action: "lap" | "sprint" | "abort"; opts: { backend, iterations, shots }. */
+export function hardwareCmd(action, opts = {}) {
+  const msg = { action };
+  if (opts.backend !== undefined) msg.backend = opts.backend;
+  if (opts.iterations !== undefined) msg.iterations = opts.iterations;
+  if (opts.shots !== undefined) msg.shots = opts.shots;
+  return send("hardware", msg);
 }

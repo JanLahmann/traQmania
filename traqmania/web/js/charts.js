@@ -130,6 +130,107 @@ export class TrainingChart {
   }
 }
 
+// -- SPSA loss chart ------------------------------------------------------------
+// Single-series loss vs iteration line for hardware training sprints.
+
+export class LossChart {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.ctx = canvas.getContext("2d");
+    this.points = []; // [{it, loss}]
+    this._raf = 0;
+    this.draw();
+  }
+
+  addPoint(iteration, loss) {
+    this.points.push({ it: iteration, loss });
+    if (!this._raf) {
+      this._raf = requestAnimationFrame(() => {
+        this._raf = 0;
+        this.draw();
+      });
+    }
+  }
+
+  reset() {
+    this.points = [];
+    this.draw();
+  }
+
+  _extent() {
+    if (this.points.length === 0) return null;
+    let minX = Infinity;
+    let maxX = -Infinity;
+    let minY = Infinity;
+    let maxY = -Infinity;
+    for (const p of this.points) {
+      if (p.it < minX) minX = p.it;
+      if (p.it > maxX) maxX = p.it;
+      if (p.loss < minY) minY = p.loss;
+      if (p.loss > maxY) maxY = p.loss;
+    }
+    if (minX === maxX) maxX = minX + 1;
+    if (minY === maxY) {
+      minY -= 0.5;
+      maxY += 0.5;
+    }
+    return { minX, maxX, minY, maxY };
+  }
+
+  draw() {
+    const { ctx, canvas } = this;
+    const W = canvas.width;
+    const H = canvas.height;
+    ctx.clearRect(0, 0, W, H);
+    ctx.font = "10px system-ui, sans-serif";
+
+    const ext = this._extent();
+    if (!ext) {
+      ctx.fillStyle = "#8a91a0";
+      ctx.textAlign = "center";
+      ctx.fillText("no sprint data yet…", W / 2, H / 2);
+      return;
+    }
+
+    const px = (it) => PAD.l + ((it - ext.minX) / (ext.maxX - ext.minX)) * (W - PAD.l - PAD.r);
+    const py = (v) => H - PAD.b - ((v - ext.minY) / (ext.maxY - ext.minY)) * (H - PAD.t - PAD.b);
+
+    // axes
+    ctx.strokeStyle = "#2a3040";
+    ctx.beginPath();
+    ctx.moveTo(PAD.l, PAD.t);
+    ctx.lineTo(PAD.l, H - PAD.b);
+    ctx.lineTo(W - PAD.r, H - PAD.b);
+    ctx.stroke();
+
+    ctx.fillStyle = "#8a91a0";
+    ctx.textAlign = "right";
+    ctx.fillText(ext.maxY.toFixed(2), PAD.l - 4, PAD.t + 8);
+    ctx.fillText(ext.minY.toFixed(2), PAD.l - 4, H - PAD.b);
+    ctx.textAlign = "center";
+    ctx.fillText(String(ext.minX), PAD.l, H - 8);
+    ctx.fillText(String(ext.maxX), W - PAD.r, H - 8);
+
+    const color = SERIES_COLORS.quantum;
+    ctx.strokeStyle = color;
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    this.points.forEach((p, i) => {
+      if (i === 0) ctx.moveTo(px(p.it), py(p.loss));
+      else ctx.lineTo(px(p.it), py(p.loss));
+    });
+    ctx.stroke();
+    ctx.lineWidth = 1;
+    const last = this.points[this.points.length - 1];
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px(last.it), py(last.loss), 2.5, 0, 2 * Math.PI);
+    ctx.fill();
+    ctx.textAlign = "left";
+    ctx.fillText(last.loss.toFixed(3), Math.min(px(last.it) + 5, W - 30), py(last.loss) - 4);
+  }
+}
+
 // -- lap-time chart -----------------------------------------------------------
 // Scatter of lap time vs episode per agent. The y axis is inverted (best lap
 // at the top — lower is better), with the overall best per agent as a dashed

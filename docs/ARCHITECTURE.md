@@ -1,0 +1,313 @@
+# traQmania architecture
+
+How the pieces fit: a numpy physics/RL core, a FastAPI + WebSocket demo server
+that ticks one shared session, a vanilla-ES-module browser frontend, and an
+optional bridge to IBM Quantum hardware.
+
+## System overview
+
+```mermaid
+flowchart LR
+    subgraph browser [Browser - traqmania/web]
+        main[main.js\nboot + wiring]
+        net[net.js\nws client, reconnect]
+        race[race.js\ncanvas renderer]
+        panels[quantum-panel.js / charts.js\ncircuit.js / attract.js / explain.js]
+        input[input.js\nkeys -> bitmask]
+    end
+
+    subgraph server [Server - traqmania/server]
+        app[app.py\nFastAPI: /health, /ws, static]
+        ws[ws.py\nHub + per-socket loop]
+        proto[protocol.py\ntyped messages, strict validation]
+        session[session.py\nDemoSession: 60 Hz tick,\nmode state machine]
+        runtime[runtime.py\nagents/tracks/ghosts/config glue]
+    end
+
+    subgraph core [Core - traqmania]
+        env[env/: track.py, car.py,\nracing_env.py]
+        agents[agents/: quantum fastsim+adjoint,\nMLP, DQNTrainer, SPSA]
+        hw[hardware.py\nEstimatorV2 lap + SPSA sprint]
+    end
+
+    ibm[(IBM Quantum\nor fake backend)]
+
+    main --- net
+    net <-->|JSON over /ws| ws
+    ws --> proto
+    ws --> session
+    session --> runtime
+    session --> env
+    session --> agents
+    session --> hw
+    hw --> ibm
+    app --> ws
+```
+
+## Module map
+
+| Module | Responsibility |
+|---|---|
+| `traqmania/__main__.py` | CLI entry point: profile/config/host/port flags, starts uvicorn. |
+| `traqmania/config.py` | `default.toml` + profile overlay (`pi4`, `pi5`, `exhibition`) + optional extra TOML; `./config/*.toml` in the working dir shadows packaged profiles. |
+| `traqmania/env/track.py` | Closed-loop track geometry: resampling, arc-length projection, lidar raycasts, spatial-hash acceleration, validation. |
+| `traqmania/env/car.py` | Vectorized bicycle-ish car physics (throttle/brake/drag, speed-dependent steering). |
+| `traqmania/env/racing_env.py` | Gym-style vector env: obs = 3 lidar rays + speed, progress reward, checkpoint/lap bonuses, off-track penalty, auto-reset. |
+| `traqmania/agents/base.py` | `QFunction` protocol + the 4 discrete actions (left/straight/right at full throttle, coast-brake). |
+| `traqmania/agents/quantum/circuit.py` | Canonical Qiskit circuit (single source of truth) + JSON `circuit_spec` for the browser diagram. |
+| `traqmania/agents/quantum/fastsim.py`, `adjoint.py` | Hand-written numpy statevector simulator and adjoint (backprop-style) gradients. |
+| `traqmania/agents/quantum/qdqn.py` | `QuantumQFunction`: fastsim-backed `QFunction`, flat 56-param layout `[lam, theta, w, b]`. |
+| `traqmania/agents/quantum/qnn.py` | Same circuit via qiskit-machine-learning `EstimatorQNN` (parity checks, shots/noise backends). |
+| `traqmania/agents/classical/mlp.py` | 76-parameter numpy MLP baseline (4-8-4, tanh) with analytic backprop. |
+| `traqmania/agents/training/dqn.py` | Double-DQN loop over vectorized envs, Adam, replay buffer — shared by both backends. |
+| `traqmania/agents/training/spsa.py` | Minimal SPSA minimizer used by hardware sprints. |
+| `traqmania/hardware.py` | IBM/fake backends via `qiskit-ibm-runtime`: `HardwareQFunction` (inference-only, EstimatorV2), `run_hardware_lap`, `spsa_sprint`; also a CLI (`python -m traqmania.hardware lap|sprint`). |
+| `traqmania/server/protocol.py` | Typed WS messages; strict client-side validation (`ProtocolError`). |
+| `traqmania/server/session.py` | `DemoSession`: the mode state machine and synchronous 60 Hz `tick()`; training threads; ghost recording. |
+| `traqmania/server/runtime.py` | Loading bundled agents/weights/tracks/ghosts, track payloads, training-config resolution. |
+| `traqmania/server/ws.py` | Connection `Hub`, broadcast fan-out, per-socket receive loop. |
+| `traqmania/server/app.py` | FastAPI factory: `/health`, `/ws`, static frontend mounted last. |
+| `traqmania/train_headless.py` | Offline training CLI that produces the bundled `weights/*.npz` (+ `.meta.json`, history JSON). |
+| `traqmania/bench.py` | Micro-benchmarks (env steps, forward passes, DQN updates). |
+| `tools/make_stages.py` | Trains a fresh quantum agent, snapshots parameters as it learns, and saves 4 evolution-stage weights `quantum_<track>_stage{1..4}.npz` (+ `.meta.json` with the episode count shown as the car label). |
+| `traqmania/web/` | Frontend ES modules (`main`, `net`, `race`, `input`, `charts`, `circuit`, `quantum-panel`, `hardware-panel`, `attract`, `explain`); no build step, served statically. |
+
+## WebSocket protocol reference
+
+> **Keep in sync:** this section is hand-generated from
+> `traqmania/server/protocol.py`. If you change the protocol, change this
+> table in the same commit. Every message is a JSON object with a `"type"`
+> field. Client→server messages are **strictly validated**: unknown types,
+> unknown fields, wrong value types, and out-of-enum values all get an
+> `error` reply on the offending socket (other clients are unaffected).
+> Fields marked *omitted-if-null* are dropped from the wire when `None`.
+
+### Client → server
+
+**`hello`** `{}` — request a fresh `welcome` on this socket (also sent
+automatically to every client on connect).
+
+**`input`** — human driving input, last-writer-wins across all sockets (one
+shared seat). `keys` is always required.
+
+| field | type | required | meaning |
+|---|---|---|---|
+| `keys` | int 0–15 | yes | bitmask: 1 throttle, 2 brake, 4 left, 8 right (left+right cancel, brake overrides throttle) |
+| `steer` | float [-1, 1] | no | analog steering (clamped at parse time) |
+| `throttle` | float [0, 1] | no | analog throttle (clamped) |
+| `brake` | float [0, 1] | no | analog brake (clamped) |
+
+When **any** analog field is present the server drives from the analog values
+instead of the bitmask (missing axes default to 0.0; send `keys: 0`
+alongside). The analog override persists until a later keys-only `input`.
+
+**`set_mode`** — `{mode}` with `mode` ∈ `attract | train | race | evolution |
+hardware`.
+
+**`set_track`** — `{track}` (a name from `welcome.tracks`). Rejected with an
+`error` while training is running or for unknown names.
+
+**`train`**
+
+| field | type | required | meaning |
+|---|---|---|---|
+| `action` | `"start"` \| `"stop"` | yes | |
+| `agent` | `"quantum"` \| `"mlp"` \| `"both"` | yes | `both` starts two side-by-side jobs |
+| `track` | str | no | switch track first |
+| `warm` | bool | no (default false) | start from bundled warm-start weights (quantum only) |
+| `episodes` | int ≥ 1 | no | overrides the config default |
+
+**`race`**
+
+| field | type | required | meaning |
+|---|---|---|---|
+| `action` | `"start"` \| `"reset"` | yes | `reset` respawns all cars (race mode only) |
+| `opponent` | `"quantum"` \| `"mlp"` | yes | |
+| `track` | str | no | switch track first |
+
+**`hardware`** — run the quantum policy on an IBM backend (or a local fake
+noise-model twin).
+
+| field | type | required | meaning |
+|---|---|---|---|
+| `action` | `"lap"` \| `"sprint"` \| `"abort"` | yes | one inference lap / SPSA fine-tune / cancel |
+| `backend` | `"fake"` \| `"real"` | yes | fake = local `FakeBackendV2`, no account needed |
+| `iterations` | int ≥ 1 | no | SPSA iterations (sprint only) |
+| `shots` | int ≥ 1 | no | shots per estimation (default 1024) |
+| `max_decisions` | int ≥ 1 | no | lap only: cap the rollout at N backend decisions |
+
+### Server → client
+
+**`welcome`** — sent on connect and in reply to `hello`:
+`{mode, track: TrackPayload, tracks: [str], circuit_spec, ui}`.
+`circuit_spec` is the JSON gate-by-gate circuit description from
+`agents/quantum/circuit.circuit_spec` (qubit/layer/gate list, parameter
+counts, readout observables). `ui` is the `[ui]` config section
+(`attract_idle_seconds`, `kiosk`).
+
+**`track`** — `{track: TrackPayload}` after a successful track switch.
+
+*TrackPayload* (built in `runtime.track_payload`): `name`, `half_width`,
+`total_length`, `checkpoints` (fractions of a lap), `theme` (free-form dict
+from the track JSON), `start: {x, y, theta}`, and polylines `centerline`,
+`left`, `right` as `[[x, y], ...]`.
+
+**`state`** — `{t: float, mode, cars: [CarState]}` at the broadcast rate.
+
+*CarState:*
+
+| field | type | notes |
+|---|---|---|
+| `id` | str | `"human"`, `"quantum"`, `"mlp"`, `"stage1..4"` (evolution), `"ghost"`, `"hardware"` |
+| `kind` | `"human"` \| `"quantum"` \| `"mlp"` | |
+| `x`, `y`, `theta`, `v` | float | pose + speed |
+| `lap` | int | completed laps |
+| `progress` | float | signed arc-length progress |
+| `last_lap_time` | float \| null | null until the first lap |
+| `off_track` | bool | |
+| `rays` | [float] | *omitted-if-null*; normalized lidar distances (agent cars) |
+| `label` | str | *omitted-if-null*; e.g. `"ep 250"` (evolution), `"best 14.4s"` (ghost), `"hardware lap"` |
+| `ghost` | bool | *omitted-if-null*; true for replay cars |
+
+**`quantum`** — live circuit introspection for a quantum car, throttled to
+≤ 10 Hz per car: `{car_id, expectations: [float], q_values: [float],
+action: int}` (`expectations` are the raw ⟨Z_a⟩ readouts).
+
+**`telemetry`** — training progress per agent at the telemetry rate:
+`{agent, episode, mean_return, epsilon, loss: float|null,
+returns_tail: [float]}` (last ≤ 100 episode returns), plus *omitted-if-null*
+`best_lap_s: float` and `lap_times: [[episode, lap_s], ...]` (last ≤ 50).
+
+**`event`** — `{kind, car_id?, lap_time?, agent?}` with `kind` ∈
+`lap | crash | clean_lap | training_done | new_best_lap` (optional fields
+*omitted-if-null*; `new_best_lap` carries `agent` during training and
+`car_id` for ghost records).
+
+**`hardware_status`** — progress of a hardware lap/sprint:
+
+| field | type | meaning |
+|---|---|---|
+| `phase` | `"idle"` \| `"connecting"` \| `"transpiling"` \| `"running"` \| `"replay"` \| `"done"` \| `"error"` | |
+| `backend_name` | str? | resolved backend |
+| `message` | str? | human-readable status / error text |
+| `decision` | int? | lap: decisions completed so far |
+| `seconds_per_decision` | float? | lap: measured latency |
+| `iteration` | int? | sprint: SPSA iterations completed so far |
+| `loss` | float? | sprint: current TD loss |
+| `eval_return_before` / `eval_return_after` | float? | sprint: greedy fastsim return before/after |
+| `lap_time` | float? | lap: completed lap time |
+
+All optional fields are *omitted-if-null*; `running`-phase messages are
+throttled to ≤ 5 Hz. The job itself runs in a background thread (like
+training) so the tick loop never blocks on a quantum backend.
+
+A finished hardware lap **replays in the race canvas** as a car
+`{id: "hardware", kind: "quantum", ghost: true, label: "hardware lap"}`,
+alongside a fastsim car driving the same weights for comparison.
+
+**`error`** — `{message}`; sent on the offending socket for malformed input,
+broadcast for session-level failures (unknown track, training already
+running, a training thread crashing, ...).
+
+## Data flow and rates
+
+All timing derives from `[physics] dt = 1/60` and
+`substeps_per_decision = 6`:
+
+- **60 Hz physics** — `DemoSession.tick()` advances one substep per call; the
+  asyncio loop (`DemoSession.run`) drives it with drift correction (and
+  resyncs rather than spiraling if it falls > 0.5 s behind). Tests call
+  `tick()` directly; nothing in the session requires an event loop.
+- **10 Hz decisions** — every 6th substep each agent car observes (3 rays +
+  speed), takes `argmax Q`, and holds that action for the next 6 substeps —
+  exactly matching training. `quantum` introspection messages are throttled
+  to ≤ 10 Hz per car.
+- **20 Hz broadcast** — `state` messages at `[server] broadcast_hz`
+  (15 on the Pi profiles). Ghost replay cars are stored at decision rate
+  (10 Hz) and lerped back to 60 Hz for smooth playback.
+- **10 Hz telemetry** — in train mode, `telemetry`/event messages at
+  `[server] telemetry_hz` (5 on Pi). Training itself runs in **background
+  threads** (`DQNTrainer` on vectorized envs); the tick loop samples live car
+  states via `RacingEnv.state_snapshot()` and reads shared job stats under a
+  lock — the GIL-released numpy inner loops keep the server responsive.
+
+The session is **shared**: every websocket client sees the same world; human
+input is last-writer-wins, and input resets to 0 when the last client
+disconnects.
+
+## How-to guides
+
+### Add a track
+
+Drop `traqmania/env/tracks/<name>.json`:
+
+```json
+{
+  "name": "hairpin",
+  "centerline": [[x0, y0], [x1, y1], ...],
+  "half_width": 7.0,
+  "checkpoints": [0.25, 0.5, 0.75],
+  "theme": {"surface": "asphalt", "edge": "kerb-red"}
+}
+```
+
+- `centerline`: ≥ 3 `[x, y]` points tracing a **closed loop** in world units.
+  A gap between the first and last point of up to 25 % of the loop length is
+  auto-closed with a straight segment; larger gaps are rejected. The polyline
+  is resampled to ~`[track] resample_spacing` (1.5 units) spacing on load.
+- `half_width`: ≥ 3.0 (validated).
+- Minimum corner radius after resampling: **6.0 units** (validated —
+  `Track.load` raises `ValueError` naming the offending value).
+- `checkpoints`: optional lap fractions, strictly increasing in `[0, 1)`
+  (each grants `checkpoint_bonus` reward once per lap).
+- `theme`: optional, passed through to the renderer untouched.
+
+The track appears automatically in `welcome.tracks` and the UI picker
+(`runtime.available_tracks()` globs the directory). Attract/race/evolution
+need weights though: train and save them with
+
+```sh
+python -m traqmania.train_headless --agent quantum --track hairpin
+python -m traqmania.train_headless --agent mlp --track hairpin
+python tools/make_stages.py --track hairpin   # evolution-mode snapshots
+```
+
+which writes `traqmania/weights/{quantum,mlp}_hairpin.npz` + `.meta.json`.
+Slow-to-learn tracks can get a `[training_presets.hairpin]` section in
+`default.toml` (merged onto `[training]` by `runtime.resolve_training_cfg`).
+
+### Add an agent
+
+Implement the `QFunction` protocol from `traqmania/agents/base.py` — batched
+numpy, parameters in one flat vector:
+
+```python
+class MyQFunction:
+    n_features: int   # 4 = 3 lidar rays + speed
+    n_actions: int    # 4 = left / straight / right / brake
+
+    def q_values(self, obs):            # (B, F) -> (B, A)
+    def grad_selected(self, obs, action_idx, upstream):  # -> (P,)
+        # gradient of sum_b upstream[b] * Q[b, action_idx[b]] wrt flat params
+    def get_params(self):               # -> (P,)
+    def set_params(self, params): ...
+```
+
+`DQNTrainer` works unchanged with any implementation (the target network is
+just a second flat parameter vector). To expose it in the demo, wire it into
+`runtime.load_agent` and add the kind to the relevant enums in `protocol.py`
+(`CAR_KINDS`, plus `OPPONENTS`/`TRAIN_AGENTS` if it should be raceable /
+trainable) — and update the protocol reference above. `QuantumQFunction` and
+`MLPQFunction` are the reference implementations; `HardwareQFunction` shows a
+legitimate partial one (inference-only, `grad_selected` raises).
+
+### Add a mode
+
+1. Add the name to `MODES` in `protocol.py` (client `set_mode` validation).
+2. In `session.py`, handle it in `_set_mode` and write an `_enter_<mode>`
+   that builds `self.cars` (see `_enter_evolution` for a multi-car example);
+   extend `tick()` if the mode needs non-default per-substep behavior.
+3. Frontend: add a `<button data-mode="...">` in `index.html` and any
+   mode-specific UI in `main.js` (`applyMode`).
+4. Update the protocol reference above and `docs/EXHIBITION.md` talking
+   points.

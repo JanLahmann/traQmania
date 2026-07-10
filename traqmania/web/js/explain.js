@@ -75,13 +75,19 @@ const SECTIONS = [
         run and watch the learning curve grow in the Training tab.</li>
         <li><strong>Race</strong> — drive yourself with the arrow keys or WASD
         (↑/W throttle, ↓/S brake, ←/→ steer) against the quantum or classical
-        agent.</li>
+        agent. A game controller works too: plug one in and the left stick
+        steers while the triggers give analog throttle and brake.</li>
+        <li><strong>Hardware</strong> — run the trained circuit on an IBM
+        Quantum backend: either a local noisy simulation of a real device, or
+        an actual quantum computer (queue times apply). Watch the hardware lap
+        replay as a ghost next to a simulator car, or run a short SPSA
+        training sprint directly on the backend.</li>
       </ul>
-      <p>Everything here runs a fast <em>simulator</em> of the quantum circuit
+      <p>Everything else runs a fast <em>simulator</em> of the quantum circuit
       — that is standard practice for training, since today's real quantum
       hardware is too slow and too noisy for millions of training steps. The
-      identical circuit can be executed on real quantum hardware for
-      inference.</p>`,
+      identical circuit executes on real quantum hardware in Hardware
+      mode.</p>`,
   },
 ];
 

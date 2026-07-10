@@ -152,6 +152,25 @@ input[type="number"] {
   border-color: rgba(255, 159, 28, 0.5);
 }
 
+.pill-idle {
+  color: var(--muted);
+}
+
+.pill-busy {
+  color: var(--quantum);
+  border-color: rgba(122, 92, 255, 0.5);
+}
+
+.pill-err {
+  color: var(--danger);
+  border-color: rgba(229, 72, 77, 0.5);
+}
+
+.pill-pad {
+  color: var(--mlp);
+  border-color: rgba(47, 191, 113, 0.35);
+}
+
 /* -- layout ----------------------------------------------------------------- */
 
 #layout {
@@ -478,15 +497,17 @@ input[type="number"] {
   border: 1px solid var(--mlp);
 }
 
-/* -- training panel ---------------------------------------------------------- */
+/* -- training + hardware panels ----------------------------------------------- */
 
-#train-form {
+#train-form,
+#hw-form {
   display: flex;
   flex-direction: column;
   gap: 10px;
 }
 
-#train-form label {
+#train-form label,
+#hw-form label {
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -498,7 +519,8 @@ input[type="number"] {
   justify-content: flex-start;
 }
 
-#train-form input[type="number"] {
+#train-form input[type="number"],
+#hw-form input[type="number"] {
   width: 90px;
 }
 
@@ -508,11 +530,41 @@ input[type="number"] {
 }
 
 #training-chart,
-#lap-chart {
+#lap-chart,
+#hw-loss-chart {
   width: 100%;
   background: var(--bg-inset);
   border: 1px solid var(--border);
   border-radius: 8px;
+}
+
+.hw-btn-row {
+  flex-wrap: wrap;
+}
+
+.hw-status-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 8px 0;
+}
+
+.hw-backend-name {
+  color: var(--muted);
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+#hw-message.hw-error {
+  color: var(--danger);
+}
+
+.eval-up {
+  color: var(--mlp);
+}
+
+.eval-down {
+  color: var(--danger);
 }
 
 .stat-row {
