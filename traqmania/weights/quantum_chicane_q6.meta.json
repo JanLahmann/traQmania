@@ -1,0 +1,14 @@
+{
+  "agent": "quantum",
+  "track": "chicane",
+  "config_hash": "2340f5f7232e",
+  "n_qubits": 6,
+  "params": 80,
+  "seed": 42,
+  "episodes": 600,
+  "eval_episodes": 6,
+  "eval_laps": 6,
+  "eval_best_lap": 14.8,
+  "snapshot_episode": 450,
+  "date": "2026-07-10"
+}

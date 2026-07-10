@@ -1,0 +1,12 @@
+{
+  "agent": "quantum",
+  "track": "oval",
+  "config_hash": "2340f5f7232e",
+  "n_qubits": 6,
+  "params": 80,
+  "seed": 0,
+  "episodes": 300,
+  "eval_laps": 0,
+  "note": "pre-first-lap checkpoint for warm live training; with [training_warm] (eps 0.25, decay 40) the agent laps in seconds of fine-tuning (3/3 seeds in training; post-warm greedy robustness varies by seed)",
+  "date": "2026-07-10"
+}
