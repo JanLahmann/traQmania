@@ -159,32 +159,40 @@ class DQNTrainer:
         return float(np.mean(td**2))
 
     def _greedy_eval(self, env, max_steps: int = 5000) -> tuple[int, float, float]:
-        """Run ``eval_episodes`` greedy (epsilon = 0) episodes on ``env``.
+        """Greedy (epsilon = 0) eval: one full episode per env, in parallel.
 
-        Returns (laps_completed, best_lap_seconds, mean_return); best_lap is
-        +inf when no lap finished.  Expects the racing-env info dict (``lap``,
-        ``last_lap_time``); envs without it simply score (0, inf, mean_return).
+        Counts laps INCREMENTALLY while each env's first episode is still
+        running and stops once every env has finished one episode (crash or
+        step cap) — counting laps only at ``done`` undercounts exactly the
+        good policies, whose envs lap on without finishing, while crashing
+        envs "finish" fast.  Returns (laps_completed, best_lap_seconds,
+        mean_return); best_lap is +inf when no lap finished.  Expects the
+        racing-env info dict (``lap``, ``last_lap_time``).
         """
         obs = env.reset()
-        finished = 0
+        n_envs = obs.shape[0]
+        done_seen = np.zeros(n_envs, dtype=bool)
+        prev_lap = np.zeros(n_envs, dtype=np.int64)
         laps = 0
         best_lap = float("inf")
-        return_acc = np.zeros(obs.shape[0])
+        return_acc = np.zeros(n_envs)
         episode_returns: list[float] = []
         for _ in range(max_steps):
             actions = np.argmax(self.qfunc.q_values(obs), axis=1)
             obs, reward, done, info = env.step(actions)
-            return_acc += reward
+            active = ~done_seen
+            return_acc[active] += np.asarray(reward)[active]
             if isinstance(info, dict) and "lap" in info:
+                lap = np.asarray(info["lap"], dtype=np.int64)
+                laps += int(np.sum(np.maximum(lap - prev_lap, 0)[active]))
+                prev_lap = np.where(np.asarray(done, dtype=bool), 0, lap)  # env auto-resets
                 lap_times = np.asarray(info.get("last_lap_time", np.nan), dtype=np.float64)
-                if np.any(~np.isnan(lap_times)):
-                    best_lap = min(best_lap, float(np.nanmin(lap_times)))
-                laps += int(np.sum(np.asarray(info["lap"])[np.flatnonzero(done)]))
-            for i in np.flatnonzero(done):
+                if np.any(active & ~np.isnan(lap_times)):
+                    best_lap = min(best_lap, float(np.nanmin(lap_times[active])))
+            for i in np.flatnonzero(np.asarray(done, dtype=bool) & active):
                 episode_returns.append(float(return_acc[i]))
-            return_acc[done] = 0.0
-            finished += int(np.sum(done))
-            if finished >= self.eval_episodes:
+            done_seen |= np.asarray(done, dtype=bool)
+            if done_seen.all():
                 break
         mean_return = float(np.mean(episode_returns)) if episode_returns else float("-inf")
         return laps, best_lap, mean_return
