@@ -201,7 +201,11 @@ trained gp at q6 (plain and feature observations, 2000 episodes, 2 seeds)
 and q8 (features, 2000 episodes) with zero clean laps in any run, and combo
 at q6/q8 (2500 episodes) where only the q6 run ever lapped greedily — and a
 12-episode re-evaluation of that snapshot laps in only ~8 % of episodes
-(best 21.6 s), far too fragile to ship. More qubits do not rescue the hard
+(best 21.6 s), far too fragile to ship. Even q10 does not help: bonus lanes
+trained gp at q10 with engineered features (2000 episodes) and combo at q10
+(2500 episodes); both eventually lapped *during exploration* (gp at
+episode 1772, combo at episode 1416 with a 20.2 s best) but neither's best
+greedy snapshot completes a single lap. More qubits do not rescue the hard
 tracks; the braking problem is a recipe/exploration problem, not a capacity
 one (the 4-qubit gp sweep above proves the point).
 
