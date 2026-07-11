@@ -13,7 +13,15 @@ export const STAGE_COLORS = ["#5c6b8a", "#3e63dd", "#7a5cff", "#e5484d", "#ff9f1
 
 const TRAIL_MAX = 300; // points kept per car
 const TRAIL_BREAK_DIST = 8; // world units; larger jumps break the polyline
-const TRAIL_ALPHA = { train: 0.35, evolution: 0.22, attract: 0.13, race: 0.13 };
+const TRAIL_ALPHA = { train: 0.4, evolution: 0.26, attract: 0.22, race: 0.2 };
+
+const V_MAX = 22.0; // [car].v_max — speed normalization for trails and bars
+// Trail speed shading: below SPEED_COLD renders darkest, above SPEED_HOT
+// brightest; the useful racing range on the bundled tracks sits in between.
+const SPEED_COLD = 5.0;
+const SPEED_HOT = 19.0;
+const N_SPEED_BUCKETS = 5;
+const BRAKE_DECEL = 9.0; // world units/s²; drag alone tops out at ~7.7
 
 const SURFACE_COLORS = {
   asphalt: "#2a2e37",
@@ -41,6 +49,26 @@ function themeColor(map, key, fallback) {
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
+}
+
+function hexToRgb(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
+/** CSS color t of the way from hex c1 to hex c2. */
+function mixColor(c1, c2, t) {
+  const a = hexToRgb(c1);
+  const b = hexToRgb(c2);
+  return `rgb(${Math.round(lerp(a[0], b[0], t))},${Math.round(
+    lerp(a[1], b[1], t),
+  )},${Math.round(lerp(a[2], b[2], t))})`;
+}
+
+/** Speed -> trail bucket index (0 = slowest/darkest). */
+function speedBucket(v) {
+  const t = Math.min(Math.max((v - SPEED_COLD) / (SPEED_HOT - SPEED_COLD), 0), 1);
+  return Math.round(t * (N_SPEED_BUCKETS - 1));
 }
 
 function lerpAngle(a, b, t) {
@@ -113,8 +141,9 @@ export class RaceRenderer {
     this.running = false;
     this._dirtyLayer = true;
     this.mode = "attract";
-    this.trails = new Map(); // car id -> {car, pts: [[x,y]|null, ...]}
+    this.trails = new Map(); // car id -> {car, pts: [[x,y,v]|null, ...]}
     this._stageColors = new Map(); // evolution label -> palette colour
+    this._speedPalettes = new Map(); // car color -> per-bucket trail colors
 
     const ro = new ResizeObserver(() => this._resize());
     ro.observe(canvas.parentElement || canvas);
@@ -199,7 +228,7 @@ export class RaceRenderer {
       if (last && Math.hypot(car.x - last[0], car.y - last[1]) > TRAIL_BREAK_DIST) {
         pts.push(null);
       }
-      pts.push([car.x, car.y]);
+      pts.push([car.x, car.y, car.v]);
       while (pts.length > TRAIL_MAX) pts.shift();
     }
     for (const id of [...this.trails.keys()]) {
@@ -348,6 +377,7 @@ export class RaceRenderer {
         y: lerp(p.y, c.y, alpha),
         theta: lerpAngle(p.theta, c.theta, alpha),
         v: lerp(p.v, c.v, alpha),
+        dvdt: ((c.v - p.v) / span) * 1000,
       };
     });
   }
@@ -380,47 +410,65 @@ export class RaceRenderer {
     this._drawLabels(ctx, cars);
   }
 
+  /** Per-bucket trail colors for one car color: dark (slow) -> bright (fast). */
+  _speedPalette(color) {
+    let pal = this._speedPalettes.get(color);
+    if (!pal) {
+      pal = Array.from({ length: N_SPEED_BUCKETS }, (_, b) => {
+        const t = b / (N_SPEED_BUCKETS - 1);
+        return t < 0.5
+          ? mixColor("#171c28", color, 0.25 + 1.5 * t) // slow: sunk toward the background
+          : mixColor(color, "#ffffff", (t - 0.5) * 0.7); // fast: pushed toward white
+      });
+      this._speedPalettes.set(color, pal);
+    }
+    return pal;
+  }
+
   /** Fading racing-line trails: one polyline per car, stroked in a few
-   *  alpha chunks (oldest faintest). Ghost cars never leave trails. */
+   *  alpha chunks (oldest faintest). Within a chunk, segments are grouped by
+   *  speed bucket — slow sections read dark and thin, fast ones bright and
+   *  wide, so braking zones show up on the racing line. Ghost cars never
+   *  leave trails. */
   _drawTrails(ctx) {
     if (!this.trails.size) return;
-    const maxAlpha = TRAIL_ALPHA[this.mode] ?? 0.13;
+    const maxAlpha = TRAIL_ALPHA[this.mode] ?? 0.2;
     const chunks = 4;
-    ctx.lineWidth = 0.45;
     ctx.lineJoin = "round";
     ctx.lineCap = "round";
     for (const tr of this.trails.values()) {
       const pts = tr.pts;
       if (pts.length < 2) continue;
-      ctx.strokeStyle = this._carColor(tr.car);
+      const palette = this._speedPalette(this._carColor(tr.car));
       const per = Math.ceil(pts.length / chunks);
       for (let c = 0; c < chunks; c++) {
         const start = c * per;
         const end = Math.min(pts.length - 1, (c + 1) * per);
         if (start >= end) continue;
-        ctx.globalAlpha = maxAlpha * ((c + 1) / chunks);
-        ctx.beginPath();
-        let pen = false;
-        for (let i = start; i <= end; i++) {
-          const p = pts[i];
-          if (!p) {
-            pen = false;
-            continue;
-          }
-          if (!pen) {
-            ctx.moveTo(p[0], p[1]);
-            pen = true;
-          } else {
-            ctx.lineTo(p[0], p[1]);
-          }
+        const paths = new Array(N_SPEED_BUCKETS).fill(null);
+        for (let i = start + 1; i <= end; i++) {
+          const p0 = pts[i - 1];
+          const p1 = pts[i];
+          if (!p0 || !p1) continue; // respawn break
+          const b = speedBucket(p1[2]);
+          if (!paths[b]) paths[b] = new Path2D();
+          paths[b].moveTo(p0[0], p0[1]);
+          paths[b].lineTo(p1[0], p1[1]);
         }
-        ctx.stroke();
+        ctx.globalAlpha = maxAlpha * ((c + 1) / chunks);
+        for (let b = 0; b < N_SPEED_BUCKETS; b++) {
+          if (!paths[b]) continue;
+          ctx.strokeStyle = palette[b];
+          ctx.lineWidth = 0.3 + 0.09 * b;
+          ctx.stroke(paths[b]);
+        }
       }
     }
     ctx.globalAlpha = 1;
   }
 
-  /** Car labels ("ep 250", ghost tags) in screen space, above the car. */
+  /** Car labels ("ep 250", ghost tags) in screen space above the car, plus a
+   *  small speed bar below it (fill = v / v_max; turns red under braking). */
   _drawLabels(ctx, cars) {
     const { s, ox, oy } = this.transform;
     const dpr = window.devicePixelRatio || 1;
@@ -435,6 +483,19 @@ export class RaceRenderer {
       ctx.fillText(car.label, sx, sy);
     }
     ctx.textBaseline = "alphabetic";
+    for (const car of cars) {
+      if (car.ghost) continue;
+      const braking = car.v > 2 && car.dvdt < -BRAKE_DECEL;
+      const w = 30 * dpr;
+      const h = 3.5 * dpr;
+      const sx = s * car.x + ox - w / 2;
+      const sy = -s * car.y + oy + s * 1.9;
+      const frac = Math.min(Math.max(car.v / V_MAX, 0), 1);
+      ctx.fillStyle = "rgba(16,18,24,0.6)";
+      ctx.fillRect(sx, sy, w, h);
+      ctx.fillStyle = braking ? "#e5484d" : this._carColor(car);
+      ctx.fillRect(sx, sy, w * frac, h);
+    }
   }
 
   _drawRays(ctx, car) {
@@ -463,6 +524,18 @@ export class RaceRenderer {
     if (ghost) ctx.globalAlpha = 0.35;
     ctx.translate(car.x, car.y);
     ctx.rotate(car.theta);
+
+    // brake flare: red glow off the tail while decelerating hard (drag alone
+    // can't exceed ~7.7 u/s², so this only fires on actual braking)
+    if (!ghost && !car.off_track && car.v > 2 && car.dvdt < -BRAKE_DECEL) {
+      const g = ctx.createRadialGradient(-L * 0.55, 0, 0.1, -L * 0.55, 0, 1.7);
+      g.addColorStop(0, "rgba(229,72,77,0.85)");
+      g.addColorStop(1, "rgba(229,72,77,0)");
+      ctx.fillStyle = g;
+      ctx.beginPath();
+      ctx.arc(-L * 0.55, 0, 1.7, 0, 2 * Math.PI);
+      ctx.fill();
+    }
 
     // rounded-triangle body pointing +x
     ctx.beginPath();
