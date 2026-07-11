@@ -195,19 +195,35 @@ across seeds). What grows reliably is per-decision compute, since the
 statevector goes 16 → 1024 amplitudes. The fastsim/`EstimatorQNN` parity and gradient checks
 run at 6 qubits too (forward agreement ≤ 1e-9; all 80 gradients verified
 against finite differences), and the dead-parameter teaching point above
-holds at any n. gp and combo remain untrained above 4 qubits in the bundle —
-now for a measured reason rather than a budget one: the overnight campaign
-trained gp at q6 (plain and feature observations, 2000 episodes, 2 seeds)
-and q8 (features, 2000 episodes) with zero clean laps in any run, and combo
-at q6/q8 (2500 episodes) where only the q6 run ever lapped greedily — and a
-12-episode re-evaluation of that snapshot laps in only ~8 % of episodes
-(best 21.6 s), far too fragile to ship. Even q10 does not help: bonus lanes
-trained gp at q10 with engineered features (2000 episodes) and combo at q10
-(2500 episodes); both eventually lapped *during exploration* (gp at
-episode 1772, combo at episode 1416 with a 20.2 s best) but neither's best
-greedy snapshot completes a single lap. More qubits do not rescue the hard
-tracks; the braking problem is a recipe/exploration problem, not a capacity
-one (the 4-qubit gp sweep above proves the point).
+holds at any n. The hard tracks above 4 qubits went through two campaigns
+with opposite outcomes, and the difference was the recipe, not the circuit.
+The first campaign trained gp at q6 (plain and feature observations), q8
+and q10 (features) plus combo at q6/q8/q10 — all with the *old* fast
+epsilon decay (1200 of 2000 episodes) — and every run finished with zero
+greedy laps (a few lapped during exploration only). A follow-up campaign
+re-ran the same configurations with the swept winning recipe (decay over
+2000 of 3000 episodes), and gp now laps greedily at **every** qubit count.
+36-episode reliability evals (12 episodes × 3 env seeds, same protocol as
+the 4-qubit numbers): q6-feat laps in 27/36 episodes but slowly
+(mean 41.5 s), q8-feat 18/36 (mean 40.2 s), and **q10-feat 25/36 with
+mean 22.3 s / best 20.0 s — pace-competitive with the bundled 4-qubit
+driver's 29/36 / mean 23.9 s / best 20.4 s** (one training seed vs the
+4-qubit driver's three, so treat it as an existence proof, not a spread).
+q6-plain is the cautionary tale: its snapshot posted an 18.1 s lap on the
+4-episode training-time eval, but the full check shows 5/36, and seeds 0/1
+give 1 and 0 greedy laps — a fluke, reported as such. Combo moved too:
+with the slow decay, *fresh* 4-qubit combo training laps for the first
+time under v2 (23/36, mean 38.1 s — the warm-migrated bundled driver
+stays much faster at 21/36, mean 28.7 s), while combo above 4 qubits
+still never laps greedily (fresh slow-decay and warm-from-chicane both
+fail at q6/q10; cross-track warm starts have never worked in this
+project). Net verdict, strengthened: the braking problem was a
+recipe/exploration problem, not a capacity one — with the right decay,
+capacity is fine all the way to 10 qubits. The bundle is nevertheless
+unchanged: the q8/q10 winners need the engineered-feature observation
+while weight resolution keys on qubit count alone (shipping them would
+break the plain-rays oval/chicane weights at the same size), and no q6
+candidate clears the reliability-plus-pace bar.
 
 ### Observation engineering
 

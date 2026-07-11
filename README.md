@@ -92,8 +92,11 @@ q10 observation vs quantum's 12.0 s is the closest the two have ever been,
 but it stays parity, not advantage.
 `quantum_oval_q8.npz`, `quantum_chicane_q8.npz` and the q10 pair now ship, so
 the Qubits selector works out of the box for oval and chicane at every size;
-gp/combo remain honestly untrained above 4 qubits (tested up to 10:
-greedy laps never materialize — see docs/SCIENCE.md).
+gp/combo ship no weights above 4 qubits, but not for capacity reasons:
+with the swept slow-decay recipe, gp laps greedily at every qubit count —
+at q10 with engineered features it is pace-competitive with the 4-qubit
+driver (best 20.0 s vs 20.4 s) — the winners just use an observation the
+per-qubit weight resolution can't bundle yet (see docs/SCIENCE.md).
 
 **One driver, every track**: the bundled **universal** driver — a single
 4-qubit circuit trained on all four tracks round-robin (3000 episodes),
