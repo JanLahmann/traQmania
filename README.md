@@ -152,3 +152,7 @@ noise (`aer_noisy`).
 - [The science](docs/SCIENCE.md) — the circuit, algorithm lineage, training
   and hardware approach, measured results, and what this demo does *not* claim.
 - [Notebooks](#notebooks) — the six-part build-it-from-scratch course above.
+
+## License
+
+[Apache 2.0](LICENSE) — © 2026 Jan Lahmann.
