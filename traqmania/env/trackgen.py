@@ -216,3 +216,92 @@ def generate_track(seed: int, resample_spacing: float = 1.5, difficulty: float =
         f"generate_track(seed={seed}, difficulty={difficulty}, length={length}): "
         f"no valid track after {MAX_ATTEMPTS} attempts (last error: {last_error})"
     )
+
+
+# ------------------------------------------------------------- drawn tracks
+
+DRAWN_HALF_WIDTH = 5.5      # starting width for hand-drawn tracks
+_DRAWN_MIN_HALF_WIDTH = 3.5  # narrowed toward this before giving up on pinches
+_DRAWN_PERIMETER = (280.0, 650.0)  # rescale target: drivable but inside 60 s laps
+# Denoise/smooth ladder: resample the stroke at a coarse spacing (a low-pass
+# filter over pointer jitter), then a few Chaikin iterations round the corners
+# into a near-B-spline.  Coarser spacing = smoother track; the first rung whose
+# min corner radius clears the validator keeps the most drawn detail.
+_DRAWN_COARSE_SPACINGS = (8.0, 12.0, 16.0, 20.0, 24.0, 28.0)
+_DRAWN_CHAIKIN_ITERATIONS = 4
+_DRAWN_POINTS = 300          # final resolution handed to Track (it resamples)
+
+
+def _resample_closed(pts: np.ndarray, n: int) -> np.ndarray:
+    """``n`` points spaced uniformly by arc length along the closed polyline."""
+    seg = np.linalg.norm(np.roll(pts, -1, axis=0) - pts, axis=1)
+    s = np.concatenate([[0.0], np.cumsum(seg)])
+    t = np.linspace(0.0, s[-1], n, endpoint=False)
+    ring = np.concatenate([pts, pts[:1]])
+    return np.stack([np.interp(t, s, ring[:, 0]), np.interp(t, s, ring[:, 1])], axis=1)
+
+
+def _chaikin_closed(pts: np.ndarray) -> np.ndarray:
+    """One corner-cutting iteration (closed): each segment yields its 1/4 and
+    3/4 points; repeated application converges to a smooth B-spline curve."""
+    nxt = np.roll(pts, -1, axis=0)
+    out = np.empty((2 * len(pts), 2))
+    out[0::2] = 0.75 * pts + 0.25 * nxt
+    out[1::2] = 0.25 * pts + 0.75 * nxt
+    return out
+
+
+def track_from_drawing(points, resample_spacing: float = 1.5,
+                       name: str = "drawn") -> Track:
+    """Build a drivable :class:`Track` from a hand-drawn centerline.
+
+    The stroke (list of [x, y], any scale) must end near where it started —
+    the loop is closed with a straight segment.  The shape is recentred and
+    rescaled to a drivable perimeter, Chaikin-smoothed just enough to clear
+    the 6-unit minimum corner radius, checked for surface overlap (narrowing
+    the track a little before rejecting), and finally validated by the same
+    ``Track`` construction path the bundled and generated tracks use.
+    Raises ``ValueError`` with a user-facing reason when the drawing cannot
+    be made drivable without losing its shape.
+    """
+    pts = np.asarray(points, dtype=np.float64)
+    if pts.ndim != 2 or pts.shape[1] != 2:
+        raise ValueError("expected a list of [x, y] points")
+    seg = np.linalg.norm(np.diff(pts, axis=0), axis=1)
+    pts = pts[np.concatenate([[True], seg > 1e-9])]  # drop pointer-jitter dupes
+    if len(pts) < 8:
+        raise ValueError("stroke too short — draw a full loop")
+
+    open_len = float(np.linalg.norm(np.diff(pts, axis=0), axis=1).sum())
+    gap = float(np.linalg.norm(pts[0] - pts[-1]))
+    if open_len <= 0.0 or gap > 0.35 * open_len:
+        raise ValueError("finish the loop — end the stroke near where it started")
+
+    perimeter = open_len + gap
+    scale = float(np.clip(perimeter, *_DRAWN_PERIMETER)) / perimeter
+    pts = (pts - pts.mean(axis=0)) * scale
+
+    total = float(np.linalg.norm(np.roll(pts, -1, axis=0) - pts, axis=1).sum())
+    # Validate at the Track resample resolution (with margin): the loader
+    # recomputes curvature at ``resample_spacing`` and must agree.
+    n_final = max(int(total / resample_spacing), _DRAWN_POINTS)
+    cand = None
+    for spacing in _DRAWN_COARSE_SPACINGS:
+        coarse = _resample_closed(pts, max(int(total / spacing), 10))
+        for _ in range(_DRAWN_CHAIKIN_ITERATIONS):
+            coarse = _chaikin_closed(coarse)
+        coarse = _resample_closed(coarse, n_final)
+        if _min_corner_radius(coarse) >= 6.5:
+            cand = coarse
+            break
+    if cand is None:
+        raise ValueError("corners too tight — draw wider hairpins")
+
+    half_width = DRAWN_HALF_WIDTH
+    while (half_width >= _DRAWN_MIN_HALF_WIDTH
+           and _min_self_clearance(cand, min_arc=4.0 * half_width) < 2.1 * half_width):
+        half_width -= 0.75
+    if _min_self_clearance(cand, min_arc=4.0 * half_width) < 2.1 * half_width:
+        raise ValueError("track overlaps itself — leave more room between sections")
+
+    return Track(name, cand, half_width, CHECKPOINTS, resample_spacing)

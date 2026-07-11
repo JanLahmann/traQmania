@@ -2,14 +2,14 @@
   "agent": "mlp",
   "track": "pro (multi)",
   "params": 2436,
-  "episodes": 3000,
-  "date": "DATE",
-  "provenance": "best-snapshot, standard double-DQN on the oval+chicane+gp+combo mixture, seed 42, hidden 128, 14-feature observation (9 rays + speed + 4 track scalars)",
+  "episodes": 5000,
+  "date": "2026-07-11",
+  "provenance": "best-snapshot, standard double-DQN on the oval+chicane+gp+combo mixture under physics v2, seed 0, 5000 episodes (epsilon decay 2500, gamma 0.99), hidden 128, 14-feature observation (9 rays + speed + 4 track scalars); the 3000-episode seed-42 recipe that worked under v1 fails gp under v2",
   "greedy_eval": {
-    "oval": "13.8s",
-    "chicane": "13.9s",
-    "gp": "18.9s",
-    "combo": "21.2s",
-    "generated_d0.5": "10/10"
+    "oval": "11.9s",
+    "chicane": "12.4s",
+    "gp": "17.8s",
+    "combo": "20.4s",
+    "generated_d0.5": "10/10, best 19.4s"
   }
 }

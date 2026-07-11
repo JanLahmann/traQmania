@@ -187,19 +187,29 @@ def test_analog_input_overrides_keys(tmp_path):
 # ----------------------------------------------------------------- evolution
 
 
-def test_evolution_stage_specs_oval_and_fallback():
+def test_evolution_stage_specs_oval_and_fallback(tmp_path, monkeypatch):
     specs = evolution_stage_specs("oval")  # bundled stage snapshots
     assert len(specs) == 4
     labels = [label for label, _ in specs]
     # early stages carry their episode label; the finale is the shipped driver
     assert all(re.fullmatch(r"ep \d+", label) for label in labels[:-1])
-    assert labels[-1] == "best"
+    assert labels[-1].startswith("best")
     assert specs[-1][1].name == "quantum_oval.npz"
     episodes = [int(label.split()[1]) for label in labels[:-1]]
     assert episodes == sorted(episodes) and len(set(episodes)) == 3
     assert all(path.is_file() for _, path in specs)
-    # chicane has no stage files -> [warm-start, best], no duplicated cars
-    fallback = evolution_stage_specs("chicane")
+    # a track without stage files -> [warm-start, best], no duplicated cars
+    # (every bundled track ships stages now, so stage the situation in tmp)
+    import shutil
+
+    from traqmania.server import runtime as runtime_mod
+
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    for name in ("quantum_oval_warmstart.npz", "quantum_oval.npz"):
+        shutil.copy(runtime_mod.WEIGHTS_DIR / name, weights / name)
+    monkeypatch.setattr(runtime_mod, "WEIGHTS_DIR", weights)
+    fallback = evolution_stage_specs("oval")
     assert len(fallback) == 2
     assert fallback[0][0].startswith("warm-start")
     assert fallback[1][0].startswith("best")

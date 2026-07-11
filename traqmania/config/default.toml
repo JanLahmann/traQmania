@@ -4,10 +4,15 @@
 [physics]
 dt = 0.016666667          # 60 Hz substep
 substeps_per_decision = 6 # -> 10 Hz agent decisions, action held between decisions
-accel = 9.0               # units/s^2 at full throttle
-brake = 14.0
+# "v2" speed-variation physics (2026-07-11): faster straights, same hairpin
+# discipline — hero max/min speed ratio ~1.8 on gp/combo (was ~1.5). The
+# strongest variant the 4-qubit circuit still learns: v_max 28-30 proved
+# unlearnable on gp/combo even warm-started. All bundled weights are trained
+# under these constants; changing them invalidates every .npz in weights/.
+accel = 11.0              # units/s^2 at full throttle (v1: 9.0)
+brake = 16.0              # (v1: 14.0)
 drag = 0.35
-v_max = 22.0
+v_max = 25.0              # (v1: 22.0)
 v_turn = 9.0              # speed of peak steering authority
 k_steer = 2.6             # rad/s steering rate at peak authority
 
@@ -74,6 +79,11 @@ epsilon_decay_episodes = 40
 episodes = 150
 
 # gp needs a longer warm fine-tune (merged on top of [training_warm]).
+# HONEST v2-physics caveat: gp's warm live-training is not currently reliable
+# — from the bundled pre-lap checkpoint, no seed tried lapped within these
+# 500 episodes (the fresh gp run's greedy peak arises during HIGH-epsilon
+# exploration around ep 250, which a low-epsilon fine-tune cannot retrace).
+# oval/chicane lap in ~2-3 s and combo in ~9 s of warm training.
 [training_warm_gp]
 epsilon_start = 0.35
 epsilon_decay_episodes = 150
@@ -85,6 +95,10 @@ host = "127.0.0.1"
 port = 8000
 broadcast_hz = 20
 telemetry_hz = 10
+# Shared-demo control: the wheel frees after this much driver inactivity, and
+# while other visitors wait in line a turn lasts at most driver_turn_s.
+driver_idle_s = 90.0
+driver_turn_s = 120.0
 
 [ui]
 attract_idle_seconds = 45

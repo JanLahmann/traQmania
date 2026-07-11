@@ -77,15 +77,18 @@ circuit diagram shows **6 qubits**, and the parameter count reads **80**
 (actions stay 4). Bundled 6-qubit weights exist for the **oval** only, so
 attract, race-vs-quantum, and hardware laps work there; **Evolution** and the
 **MLP opponent** are 4-qubit-only, and the UI reports a clear error if
-selected rather than crashing. Live training works on any track, but there is
-no 6-qubit warm-start checkpoint — training is cold (~28 s to a first clean
-lap on the oval). Hardware mode automatically picks a big-enough fake backend
-(the 7-qubit `fake_lagos` instead of the 5-qubit devices).
+selected rather than crashing. Live training works on any track, and the
+oval now ships a 6-qubit warm-start checkpoint and evolution stages too.
+Hardware mode automatically picks a big-enough fake backend (the 7-qubit
+`fake_lagos` instead of the 5-qubit devices). 8- and 10-qubit oval/chicane
+weights ship as well — the q10 oval driver's 12.0 s is the fastest quantum
+lap in the demo (at ~5–9 ms per decision instead of <1 ms).
 
-Talking point — the honest scaling result: *"Same circuit family at 6 qubits:
-43 % more parameters, the same number of episodes to a first lap, and no
-faster laps (14.7 s vs 14.4 s best). At this scale extra qubits neither help
-nor hurt — a real scaling data point is worth more than a hype slide."*
+Talking point — the honest scaling result: *"Same circuit family from 4 to
+10 qubits: sample efficiency stays flat — a first clean lap always lands
+between episode ~200 and ~500 — while the laps get somewhat faster (14.1 s
+at 4 qubits, 12.0 s at 10) and each decision costs ~10× more compute. A
+real scaling data point is worth more than a hype slide."*
 
 ## The 5-minute demo
 
@@ -103,18 +106,22 @@ A narrative that works cold, in order. Controls for the race segment:
 2. **Train — "watch it learn its first lap in seconds"** (~1 min).
    Mode **Train** → agent *Quantum* → tick **Warm start** → *Start
    training*. Eight cars flail, the return curve climbs, and the first clean
-   lap lands in a couple of seconds (measured 1.4–2.8 s on oval); the
-   best-lap banner fires as laps keep improving. Mention: *"This is real
-   double-DQN training against a simulated version of the circuit — the same
-   math IBM's 2020 quantum-RL paper used."* (Without warm start a full cold
-   run on oval is ~11 s to the first clean lap — still demoable; on a Pi,
-   warm only.)
+   lap lands in a couple of seconds (measured ~2.2 s on oval, ~2.7 s on
+   chicane, ~9 s on combo); the best-lap banner fires as laps keep
+   improving. Mention: *"This is real double-DQN training against a
+   simulated version of the circuit — the same math IBM's 2020 quantum-RL
+   paper used."* (Without warm start a full cold run on oval is ~18 s to the
+   first clean lap — still demoable; on a Pi, warm only. gp's warm recipe is
+   currently unreliable under the v2 physics — demo warm training on the
+   other three tracks.)
 
 3. **Evolution — "the same circuit at four ages"** (~30 s).
-   Mode **Evolution**: four cars drive weights snapshotted at increasing
-   points of one training run — the labels show how many episodes each has
-   trained ("ep N"). The youngest car wobbles and crashes; the oldest is
-   smooth. One picture of what training buys.
+   Mode **Evolution**: four numbered, colour-coded cars drive weights
+   snapshotted at increasing points of one training run — the corner legend
+   maps each number to how many episodes it trained ("ep N"). The youngest
+   car wobbles and crashes; the oldest is smooth. One picture of what
+   training buys. Works on all four bundled tracks (on gp/combo the young
+   stages mostly crawl and crash — which is exactly the story).
 
 4. **Race — "beat the quantum driver"** (~1.5 min).
    Mode **Race**, opponent *Quantum*, hand over the keyboard. Going off
@@ -145,6 +152,21 @@ A narrative that works cold, in order. Controls for the race segment:
   it. Type a seed (shown in the track label) to reload a favourite; the size
   dropdown gives short/medium/long layouts. Long tracks are for driving and
   watching, not training.
+- **Draw your own (✏️):** the crowd-pleaser — let a visitor sketch a loop on
+  the race view; the server smooths it into a drivable track and the same
+  universal circuit drives it zero-shot. Impossible drawings come back with a
+  friendly hint (open loop, crossing, too-tight corners); drawing again is
+  the adjust flow. Talking point: *"the agent has never seen this track —
+  the egocentric lidar view is why one driver generalizes."*
+- **Sharing the demo (driver lock + turn queue):** when several browsers are
+  connected — a public deployment, or visitors' phones plus the booth screen
+  — only one client at a time holds the wheel: the first to interact.
+  Anyone else who presses a control joins a waiting line ("⏳ in line — 2
+  ahead of you"); while someone waits, turns last at most 2 minutes (the
+  driver sees the countdown), and the wheel also frees after ~90 s of driver
+  inactivity or when the driver's tab closes. Tune via `[server]
+  driver_turn_s` / `driver_idle_s`. No configuration needed for a single
+  kiosk — a solo driver has no time limit and never notices any of it.
 - **Train:** double DQN, epsilon-greedy, replay buffer — the classical RL
   recipe, with the neural network swapped for a quantum circuit. Choosing
   *Both* races quantum vs MLP learning curves live. Honest line: *"similar
@@ -171,12 +193,12 @@ family of candidate racing lines and physics-derived braking/speed profiles
 straight from the track geometry, picks the fastest combination by simulating
 itself with the real car physics (crash-free laps only), and tracks it with
 continuous steering — the "perfect drive" ceiling for this car model.
-Measured: oval 13.8 s, chicane 13.9 s, gp 18.2 s, combo 20.3 s — ahead of
-every learned driver everywhere it takes skill (the pro driver ties it on
-the flat-out oval to within 0.03 s) — and it handles every generated track. Two
-talking points: the RL agents get within a few percent of this ceiling on the
-simple tracks (their gap is mostly the 4-action bang-bang control, not
-intelligence — an 8×-bigger trained MLP gets *no* faster), and the hero's
+Measured (physics v2): oval 12.1 s, chicane 12.1 s, gp 16.4 s, combo 19.0 s
+— ahead of every learned driver everywhere it takes skill (the pro driver
+edges it by 0.2 s on the flat-out oval, which is pure path geometry) — and
+it handles every generated and drawn track, adapting to physics changes with
+no retraining. Two talking points: the learned agents' gap to this ceiling
+is mostly the 4-action bang-bang control, not intelligence, and the hero's
 line visibly differs (wide entries into hairpins, earlier braking). Notes:
 the first hero lap on a track pauses ~5-8 s while the candidate search runs
 (cached afterwards), and hero laps never become ghost records — the record
@@ -185,11 +207,11 @@ board stays reserved for learned and human drivers.
 Expert mode also offers **pro — big classical DQN**: the biggest classical
 agent we train, with the exact same double-DQN recipe as every other agent —
 just more parameters (a wide MLP) and a richer observation (9 lidar rays,
-speed and four track-aware scalars), trained on all four tracks at once.
-Measured (seed 42 of 3; the others crash gp): oval 13.8 s, chicane 13.9 s,
-gp 18.9 s, combo 21.2 s and 10/10 generated tracks — the strongest learned
-driver in the demo, a second-plus behind the hero on the hard tracks. That
-gap is the 4-action control interface, not model size.
+speed and four track-aware scalars), trained on all four tracks at once
+(5000 episodes under v2; seed 0). Measured: oval 11.9 s, chicane 12.4 s,
+gp 17.8 s, combo 20.4 s and 10/10 generated tracks — the strongest learned
+driver in the demo, 1–1.4 s behind the hero on the hard tracks. That gap is
+the 4-action control interface, not model size.
 
 ## Hardware-mode prerequisites
 

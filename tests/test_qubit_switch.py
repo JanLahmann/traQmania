@@ -2,6 +2,7 @@
 rebuild (packaged q{n} profile overlay, attract reset, welcome re-broadcast),
 plus the obs_labels welcome field and strict protocol parsing."""
 
+import shutil
 import threading
 
 import numpy as np
@@ -132,7 +133,14 @@ def test_switch_back_to_4_is_bit_identical_default(tmp_path):
     assert [q["q_values"] for q in switched_q] == [q["q_values"] for q in fresh_q]
 
 
-def test_switch_to_untrained_8_degrades_gracefully(tmp_path):
+def test_switch_to_untrained_8_degrades_gracefully(tmp_path, monkeypatch):
+    # Resolve weights against a dir holding ONLY the 4-qubit oval training, so
+    # the test keeps meaning "switch to an untrained size" even after q8
+    # weights ship in the real bundle.
+    weights = tmp_path / "weights"
+    weights.mkdir()
+    shutil.copy(WEIGHTS_DIR / "quantum_oval.npz", weights / "quantum_oval.npz")
+    monkeypatch.setattr(session_mod, "WEIGHTS_DIR", weights)
     session = make_session(tmp_path)
     session.handle_message(P.Qubits(n=8))
     msgs = session.drain_outbox()

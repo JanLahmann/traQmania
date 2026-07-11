@@ -115,9 +115,11 @@ def test_auto_reset_spawns_at_start(oval, config):
     for i in np.flatnonzero(done):
         assert obs[i, 3] == 0.0
         assert np.hypot(env.state[i, 0] - x0, env.state[i, 1] - y0) <= oval.half_width
-    # The reset envs keep running normally afterwards.
+    # The reset envs keep running normally afterwards (a fresh spawn at v=0
+    # cannot crash in one step; envs still mid-drive legitimately might).
+    just_reset = np.flatnonzero(done)
     obs, reward, done, _ = env.step(np.full(3, STRAIGHT))
-    assert not np.any(done)
+    assert not np.any(done[just_reset])
 
 
 def test_determinism_same_seed(oval, config):

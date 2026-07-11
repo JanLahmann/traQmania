@@ -36,15 +36,19 @@ from traqmania.env.car import CarPhysics
 from traqmania.env.racing_env import RacingEnv
 from traqmania.server import protocol
 from traqmania.server.runtime import (
+    LEADERBOARD_MAX_ENTRIES,
     N_EVOLUTION_STAGES,
     WEIGHTS_DIR,
     available_tracks,
+    best_stage_label,
     evolution_stage_specs,
     load_agent,
     load_ghost,
+    load_leaderboard,
     load_track,
     resolve_training_cfg,
     save_ghost,
+    save_leaderboard,
     track_payload,
 )
 
@@ -224,8 +228,13 @@ class _TrainingLapMonitor:
 class DemoSession:
     """Single shared demo session (one kiosk): mode state machine + tick loop."""
 
-    def __init__(self, config: dict, ghosts_dir: Path | None = None):
+    def __init__(self, config: dict, ghosts_dir: Path | None = None,
+                 leaderboard_dir: Path | None = None):
         self._ghosts_dir = ghosts_dir  # None -> bundled traqmania/data/ghosts
+        if leaderboard_dir is None and ghosts_dir is not None:
+            # a test/host that isolates ghosts wants leaderboards isolated too
+            leaderboard_dir = Path(ghosts_dir) / "leaderboard"
+        self._leaderboard_dir = leaderboard_dir  # None -> data/leaderboard
         self._apply_config(config)
 
         self.t = 0.0
@@ -243,8 +252,11 @@ class DemoSession:
         self.track_name = str(config["track"]["default"])
         self.track_is_random = False
         self._random_seed_rng = np.random.default_rng()  # seeds for seedless rerolls
+        self._drawn_count = 0  # numbers the "drawn #N" track names
         self.track = load_track(config, self.track_name)
         self._ghost: dict | None = load_ghost(self.track_name, self._ghosts_dir)
+        self.racer_name = ""  # leaderboard display name; empty = don't record
+        self._board = load_leaderboard(self.track_name, self._leaderboard_dir)
         self.cars: list[_Car] = []
         self.jobs: dict[str, TrainingJob] = {}
         self._enter_attract()
@@ -341,6 +353,10 @@ class DemoSession:
             self._set_mode(msg.mode)
         elif isinstance(msg, protocol.SetTrack):
             self._set_track(msg.track, msg.seed, msg.length)
+        elif isinstance(msg, protocol.SetName):
+            self.racer_name = msg.name  # already stripped/length-capped
+        elif isinstance(msg, protocol.DrawTrack):
+            self._handle_draw_track(msg)
         elif isinstance(msg, protocol.Train):
             self._handle_train(msg)
         elif isinstance(msg, protocol.Race):
@@ -403,10 +419,11 @@ class DemoSession:
         if specs:
             best = quantum_weights_path(self.track_name, self.n_qubits)
             if best.is_file():
-                specs[-1] = ("best", best)  # end on the shipped driver
+                specs[-1] = (best_stage_label(best), best)  # end on the shipped driver
             return specs
         pair = [("warm-start", self._quantum_weights_path("_warmstart")),
-                ("best", quantum_weights_path(self.track_name, self.n_qubits))]
+                (best_stage_label(quantum_weights_path(self.track_name, self.n_qubits)),
+                 quantum_weights_path(self.track_name, self.n_qubits))]
         return pair if all(path.is_file() for _, path in pair) else []
 
     def _weights_unavailable(self, mode: str, opponent: str = "quantum") -> str | None:
@@ -489,7 +506,9 @@ class DemoSession:
             self.track_name = name
             self.track_is_random = False
             self._ghost = load_ghost(name, self._ghosts_dir)
+        self._reload_board()
         self._outbox.append({"type": "track", "track": track_payload(self.track)})
+        self._outbox.append(self.leaderboard_payload())
         if self.mode == "attract":
             self._enter_attract()
         elif self.mode == "race":
@@ -523,6 +542,49 @@ class DemoSession:
         except Exception as exc:
             self._error(f"random track generation failed (seed {seed}): {exc}")
             return None
+
+    def _handle_draw_track(self, msg: protocol.DrawTrack) -> None:
+        """Turn a hand-drawn centerline into the current track.
+
+        Drawn tracks behave like generated ones: no stored ghosts, and the
+        quantum car falls back to the universal driver (no specialist exists).
+        Validation failures come back as a user-facing error explaining what
+        to fix — the natural "adjust" flow is to draw again."""
+        if self._training_alive():
+            self._error("cannot change track while training is running")
+            return
+        if self._hardware_alive():
+            self._error("cannot change track while a hardware job is running")
+            return
+        try:
+            from traqmania.env.trackgen import track_from_drawing
+        except ImportError:
+            self._error("drawn tracks are not available in this build")
+            return
+        try:
+            track = track_from_drawing(
+                msg.points, self.config["track"]["resample_spacing"],
+                name=f"drawn #{self._drawn_count + 1}")
+        except ValueError as exc:
+            self._error(f"could not build the drawn track: {exc}")
+            return
+        self._drawn_count += 1
+        self.track = track
+        self.track_name = track.name
+        self.track_is_random = True  # same fallbacks as generated tracks
+        self._ghost = None
+        self._reload_board()
+        self._outbox.append({"type": "track", "track": track_payload(self.track)})
+        self._outbox.append(self.leaderboard_payload())
+        if self.mode == "attract":
+            self._enter_attract()
+        elif self.mode == "race":
+            opponent = next((c.kind for c in self.cars if c.kind != "human"), "quantum")
+            self._enter_race(opponent)
+        elif self.mode == "evolution":
+            self._enter_evolution()
+        elif self.mode == "hardware":
+            self._enter_hardware()
 
     def _handle_driver(self, msg: protocol.SetDriver) -> None:
         """Pick which training's quantum weights drive the agent car; rebuilds
@@ -1067,6 +1129,7 @@ class DemoSession:
                 if not car.lap_dirty:
                     self._event("clean_lap", car_id=car.id, lap_time=lap_time)
                     self._maybe_record_ghost(car, lap_time)
+                    self._record_leaderboard(car, lap_time)
                 car.lap_dirty = False
                 car.traj.clear()
                 car.traj_full = True
@@ -1121,6 +1184,56 @@ class DemoSession:
         if car.kind == "quantum":
             return f"{self.track_name}-trained"
         return f"{car.kind} ({self.track_name}-trained)"
+
+    # ------------------------------------------------------------ leaderboard
+
+    def _reload_board(self) -> None:
+        """Track changed: bundled tracks load their stored board; ephemeral
+        (random/drawn) tracks start a fresh session-lifetime board."""
+        if self.track_is_random:
+            self._board = {"entries": [], "references": {}}
+        else:
+            self._board = load_leaderboard(self.track_name, self._leaderboard_dir)
+
+    def leaderboard_payload(self) -> dict:
+        """The board as a wire message: ranked human entries plus the AI
+        drivers' reference laps (never ranked)."""
+        references = [
+            {"kind": kind, "driver": ref["driver"], "lap_s": ref["lap_s"]}
+            for kind, ref in sorted(self._board["references"].items(),
+                                    key=lambda kv: kv[1]["lap_s"])
+        ]
+        return {"type": "leaderboard", "track": self.track_name,
+                "entries": list(self._board["entries"]), "references": references}
+
+    def _record_leaderboard(self, car: _Car, lap_time: float) -> None:
+        """File a clean lap: named human race laps rank; agent laps only
+        update their kind's reference row."""
+        lap_time = float(lap_time)
+        changed = False
+        if car.kind == "human":
+            if self.mode != "race" or not self.racer_name:
+                return  # unnamed (or non-race) human laps are not recorded
+            entries = self._board["entries"]
+            entries.append({"name": self.racer_name, "lap_s": round(lap_time, 3),
+                            "date": time.strftime("%Y-%m-%d")})
+            entries.sort(key=lambda e: e["lap_s"])
+            del entries[LEADERBOARD_MAX_ENTRIES:]
+            changed = any(e["lap_s"] == round(lap_time, 3) and e["name"] == self.racer_name
+                          for e in entries)
+        else:
+            ref = self._board["references"].get(car.kind)
+            if ref is None or lap_time < ref["lap_s"]:
+                self._board["references"][car.kind] = {
+                    "driver": self._driver_description(car),
+                    "lap_s": round(lap_time, 3),
+                }
+                changed = True
+        if not changed:
+            return
+        if not self.track_is_random:
+            save_leaderboard(self.track_name, self._board, self._leaderboard_dir)
+        self._outbox.append(self.leaderboard_payload())
 
     def _maybe_record_ghost(self, car: _Car, lap_time: float) -> None:
         """Persist a clean lap as the track's best-lap ghost when it beats the record."""

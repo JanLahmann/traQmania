@@ -17,7 +17,9 @@ from traqmania.env.track import TRACKS_DIR, Track
 
 WEIGHTS_DIR = Path(__file__).resolve().parent.parent / "weights"
 GHOSTS_DIR = Path(__file__).resolve().parent.parent / "data" / "ghosts"
+LEADERBOARD_DIR = Path(__file__).resolve().parent.parent / "data" / "leaderboard"
 N_EVOLUTION_STAGES = 4
+LEADERBOARD_MAX_ENTRIES = 10
 
 
 TRACK_ORDER = ("oval", "chicane", "gp", "combo")  # simple -> complex, UI order
@@ -70,6 +72,14 @@ def _weights_label(path: Path, fallback: str) -> str:
         return fallback
 
 
+def best_stage_label(path: Path) -> str:
+    """"best" plus what it was trained with: the shipped driver is the best
+    greedy snapshot OF an N-episode run (its .meta.json ``episodes``), not
+    the params at a fixed episode — phrase the label accordingly."""
+    ep = _weights_label(path, "")
+    return f"best (of {ep[3:]} ep run)" if ep.startswith("ep ") else "best"
+
+
 def evolution_stage_specs(track_name: str) -> list[tuple[str, Path]]:
     """(label, weights_path) for the 4 evolution-mode cars on ``track_name``.
 
@@ -86,7 +96,7 @@ def evolution_stage_specs(track_name: str) -> list[tuple[str, Path]]:
         if best.is_file():
             # the last car runs the shipped best-snapshot driver rather than
             # the last training snapshot (final-episode params drift)
-            specs[-1] = ("best", best)
+            specs[-1] = (best_stage_label(best), best)
         return specs
     warm = WEIGHTS_DIR / f"quantum_{track_name}_warmstart.npz"
     final = WEIGHTS_DIR / f"quantum_{track_name}.npz"
@@ -95,7 +105,7 @@ def evolution_stage_specs(track_name: str) -> list[tuple[str, Path]]:
         ep = _weights_label(path, "")
         return f"{kind} ({ep})" if ep else kind
 
-    return [(pair_label("warm-start", warm), warm), (pair_label("best", final), final)]
+    return [(pair_label("warm-start", warm), warm), (best_stage_label(final), final)]
 
 
 def ghost_path(track_name: str, ghosts_dir: Path | None = None) -> Path:
@@ -131,6 +141,50 @@ def save_ghost(track_name: str, ghost: dict, ghosts_dir: Path | None = None) -> 
     path.parent.mkdir(parents=True, exist_ok=True)
     payload = {"track": track_name, **ghost}
     path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    return path
+
+
+# ------------------------------------------------------------- leaderboards
+
+
+def leaderboard_path(track_name: str, board_dir: Path | None = None) -> Path:
+    return (board_dir if board_dir is not None else LEADERBOARD_DIR) / f"{track_name}.json"
+
+
+def load_leaderboard(track_name: str, board_dir: Path | None = None) -> dict:
+    """Per-track leaderboard: named human entries (ranked) plus per-kind AI
+    reference laps (shown, never ranked). Empty board when nothing stored or
+    the file fails basic validation."""
+    empty = {"entries": [], "references": {}}
+    path = leaderboard_path(track_name, board_dir)
+    try:
+        with path.open("r", encoding="utf-8") as f:
+            board = json.load(f)
+        entries = [
+            {"name": str(e["name"])[:24], "lap_s": float(e["lap_s"]),
+             "date": str(e.get("date", ""))}
+            for e in board["entries"]
+            if float(e["lap_s"]) > 0.0 and str(e["name"]).strip()
+        ]
+        references = {
+            str(kind): {"driver": str(ref.get("driver", kind)),
+                        "lap_s": float(ref["lap_s"])}
+            for kind, ref in dict(board.get("references", {})).items()
+            if float(ref["lap_s"]) > 0.0
+        }
+        entries.sort(key=lambda e: e["lap_s"])
+        return {"entries": entries[:LEADERBOARD_MAX_ENTRIES], "references": references}
+    except (OSError, ValueError, KeyError, TypeError):
+        return empty
+
+
+def save_leaderboard(track_name: str, board: dict,
+                     board_dir: Path | None = None) -> Path:
+    """Persist a leaderboard as ``<board_dir>/<track>.json``."""
+    path = leaderboard_path(track_name, board_dir)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(json.dumps({"track": track_name, **board}) + "\n",
+                    encoding="utf-8")
     return path
 
 

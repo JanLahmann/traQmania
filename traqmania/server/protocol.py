@@ -73,6 +73,25 @@ class SetTrack:
 
 
 @dataclass(frozen=True)
+class SetName:
+    """The racer's display name for the leaderboard (empty clears it —
+    anonymous laps are not recorded)."""
+
+    name: str
+    TYPE: ClassVar[str] = "set_name"
+
+
+@dataclass(frozen=True)
+class DrawTrack:
+    """A hand-drawn centerline (list of [x, y] world coordinates, in stroke
+    order): the server rescales, smooths and validates it into a drivable
+    closed track, or answers with an error explaining what to fix."""
+
+    points: list
+    TYPE: ClassVar[str] = "draw_track"
+
+
+@dataclass(frozen=True)
 class Train:
     action: str
     agent: str
@@ -221,6 +240,36 @@ class HardwareStatus:
     eval_return_after: float | None = None
     lap_time: float | None = None
     TYPE: ClassVar[str] = "hardware_status"
+
+
+@dataclass(frozen=True)
+class Leaderboard:
+    """Per-track leaderboard: ``entries`` are ranked named human laps
+    (``{name, lap_s, date}``, fastest first); ``references`` are the AI
+    drivers' best laps (``{kind, driver, lap_s}``), shown for comparison but
+    never ranked."""
+
+    track: str
+    entries: list
+    references: list
+    TYPE: ClassVar[str] = "leaderboard"
+
+
+@dataclass(frozen=True)
+class Control:
+    """Per-client driver-lock status: whether YOU hold the wheel, whether
+    anyone does, how many other clients are connected, plus the turn queue —
+    how many stand in line, this client's 1-based place in it (null when not
+    queued), and the seconds until the current turn expires (null when no
+    countdown runs, i.e. nobody is waiting)."""
+
+    driving: bool
+    locked: bool
+    watchers: int
+    waiting: int = 0
+    queue_pos: int | None = None
+    turn_ends_in_s: int | None = None
+    TYPE: ClassVar[str] = "control"
 
 
 @dataclass(frozen=True)
@@ -374,6 +423,24 @@ def _parse_set_track(d: dict) -> SetTrack:
     )
 
 
+def _parse_set_name(d: dict) -> SetName:
+    _check_extra(d, {"name"})
+    name = _req(d, "name")
+    if not isinstance(name, str) or len(name) > 24:
+        raise ProtocolError("'name' must be a string of at most 24 characters")
+    return SetName(name=name.strip())
+
+
+def _parse_draw_track(d: dict) -> DrawTrack:
+    _check_extra(d, {"points"})
+    raw = _req(d, "points")
+    if not isinstance(raw, list) or len(raw) < 8:
+        raise ProtocolError("'points' must be a list of at least 8 [x, y] pairs")
+    if len(raw) > 5000:
+        raise ProtocolError(f"'points' too long ({len(raw)} > 5000)")
+    return DrawTrack(points=[_num_list(p, "points[]", 2) for p in raw])
+
+
 def _parse_train(d: dict) -> Train:
     _check_extra(d, {"action", "agent", "track", "warm", "episodes"})
     return Train(
@@ -422,6 +489,8 @@ _CLIENT_PARSERS = {
     Input.TYPE: _parse_input,
     SetMode.TYPE: _parse_set_mode,
     SetTrack.TYPE: _parse_set_track,
+    SetName.TYPE: _parse_set_name,
+    DrawTrack.TYPE: _parse_draw_track,
     Train.TYPE: _parse_train,
     Race.TYPE: _parse_race,
     Qubits.TYPE: _parse_qubits,
@@ -432,7 +501,8 @@ _CLIENT_PARSERS = {
 
 def parse_client(
     data: Any,
-) -> Hello | Input | SetMode | SetTrack | Train | Race | Qubits | SetDriver | HardwareMsg:
+) -> (Hello | Input | SetMode | SetTrack | SetName | DrawTrack | Train | Race
+      | Qubits | SetDriver | HardwareMsg):
     """Strictly parse a client -> server dict; raises ProtocolError on anything off."""
     if not isinstance(data, dict):
         raise ProtocolError("message must be a JSON object")
@@ -529,6 +599,32 @@ def _parse_event(d: dict) -> Event:
     )
 
 
+def _parse_leaderboard(d: dict) -> Leaderboard:
+    entries = _req(d, "entries")
+    references = _req(d, "references")
+    if not isinstance(entries, list) or not isinstance(references, list):
+        raise ProtocolError("'entries' and 'references' must be lists")
+    for e in entries:
+        _str(_req(e, "name"), "entries[].name")
+        _float(_req(e, "lap_s"), "entries[].lap_s")
+    for r in references:
+        _str(_req(r, "kind"), "references[].kind")
+        _float(_req(r, "lap_s"), "references[].lap_s")
+    return Leaderboard(track=_str(_req(d, "track"), "track"),
+                       entries=entries, references=references)
+
+
+def _parse_control(d: dict) -> Control:
+    return Control(
+        driving=_bool(_req(d, "driving"), "driving"),
+        locked=_bool(_req(d, "locked"), "locked"),
+        watchers=_int(_req(d, "watchers"), "watchers", 0),
+        waiting=_int(d["waiting"], "waiting", 0) if d.get("waiting") is not None else 0,
+        queue_pos=_opt_int(d, "queue_pos", 1),
+        turn_ends_in_s=_opt_int(d, "turn_ends_in_s", 0),
+    )
+
+
 def _parse_error(d: dict) -> Error:
     return Error(message=_str(_req(d, "message"), "message"))
 
@@ -561,13 +657,16 @@ _SERVER_PARSERS = {
     Telemetry.TYPE: _parse_telemetry,
     Event.TYPE: _parse_event,
     HardwareStatus.TYPE: _parse_hardware_status,
+    Control.TYPE: _parse_control,
+    Leaderboard.TYPE: _parse_leaderboard,
     Error.TYPE: _parse_error,
 }
 
 
 def parse_server(
     data: Any,
-) -> Welcome | TrackMsg | State | Quantum | Telemetry | Event | HardwareStatus | Error:
+) -> (Welcome | TrackMsg | State | Quantum | Telemetry | Event | HardwareStatus
+      | Control | Leaderboard | Error):
     """Parse a server -> client dict (used by tests and client tooling)."""
     if not isinstance(data, dict):
         raise ProtocolError("message must be a JSON object")

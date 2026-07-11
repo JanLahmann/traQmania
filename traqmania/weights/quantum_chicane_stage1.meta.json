@@ -1,0 +1,11 @@
+{
+  "agent": "quantum",
+  "track": "chicane",
+  "config_hash": "8859ff42f92f",
+  "episodes": 600,
+  "stage": 1,
+  "eval_episodes": 4,
+  "eval_laps": 1,
+  "eval_best_lap": 14.7,
+  "date": "2026-07-11"
+}

@@ -13,7 +13,7 @@ from fastapi import FastAPI, HTTPException, WebSocket
 from fastapi.staticfiles import StaticFiles
 
 from traqmania.server.session import DemoSession
-from traqmania.server.ws import Hub, handle_socket
+from traqmania.server.ws import Hub, control_ticker, handle_socket
 
 WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 REPO_ROOT = WEB_DIR.parent.parent  # only meaningful in a source checkout
@@ -43,17 +43,25 @@ def discover_docs() -> dict[str, Path]:
 
 def create_app(config: dict[str, Any]) -> FastAPI:
     session = DemoSession(config)
-    hub = Hub()
+    server_cfg = config.get("server", {})
+    hub = Hub(driver_idle_s=float(server_cfg.get("driver_idle_s", 90.0)),
+              driver_turn_s=float(server_cfg.get("driver_turn_s", 120.0)))
 
     @contextlib.asynccontextmanager
     async def lifespan(app: FastAPI) -> AsyncIterator[None]:
-        task = asyncio.create_task(session.run(hub), name="traqmania-session")
+        tasks = [
+            asyncio.create_task(session.run(hub), name="traqmania-session"),
+            asyncio.create_task(control_ticker(hub, session),
+                                name="traqmania-control-ticker"),
+        ]
         try:
             yield
         finally:
-            task.cancel()
-            with contextlib.suppress(asyncio.CancelledError):
-                await task
+            for task in tasks:
+                task.cancel()
+            for task in tasks:
+                with contextlib.suppress(asyncio.CancelledError):
+                    await task
 
     app = FastAPI(title="traQmania", lifespan=lifespan)
     app.state.config = config

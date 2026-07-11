@@ -109,19 +109,45 @@ qubit-aware, `min_qubits = max(5, n_qubits)`: the default circuit lands on a
 
 ## Measured results
 
-Apple Silicon laptop, `fastsim`, seed-robust (multiple seeds per cell; see
-README, `data/histories/`, and notebook 04 for the underlying runs):
+**Physics v2 (2026-07).** All numbers in this section are measured under the
+current physics constants (`accel` 11, `brake` 16, `v_max` 25 — faster
+straights, unchanged hairpin discipline). The change was made so speed
+visibly *varies*: the model-based hero driver's max/min speed ratio is 1.81
+on gp and 1.79 on combo (≈1.5 under v1), while the oval/chicane corners are
+gentle enough to stay flat-out at any of these speeds. It was tuned as far
+as the 4-qubit circuit could follow — `v_max` 28–30 variants left gp and
+combo unlearnable at 4 qubits even when warm-started — and it still has a
+real cost, reported below: the hard tracks got harder for the tiny circuit.
+Unless noted, v2 numbers are seed 42 with spot checks on 1–2 further seeds
+(the v1 campaign's full seed spreads have not been re-run yet); histories in
+`data/histories/`.
 
-| Track | Quantum first clean lap | Quantum best lap (greedy, verified 6/6) | Classical MLP best lap |
+Apple Silicon laptop, `fastsim`, greedy best-snapshot eval:
+
+| Track | Quantum first clean lap | Quantum best lap (greedy) | Classical MLP best lap |
 |---|---|---|---|
-| oval | ~11 s wall-clock training (ep ≈ 300) | 14.4 s | 13.9–15.2 s |
-| chicane | ~11 s (ep ≈ 294) | 14.1 s | 14.7–15.8 s |
-| gp | ~47 s (ep ≈ 686) | 20.4 s | 19.8–20.4 s |
+| oval | ~18 s wall-clock training (ep ≈ 381) | 14.1 s | 13.2 s |
+| chicane | ~25 s (ep ≈ 450) | 12.5 s | 13.5 s |
+| gp | ~107 s (ep ≈ 1451) | 27.8 s | 20.3 s |
+| combo | ~79 s (ep ≈ 1034, warm-started) | 27.5 s | 30.8 s |
 
-Warm-start live demo: from the bundled pre-first-lap checkpoint the quantum
-agent reaches its first clean lap in **1.4–2.8 s** of training (oval, 3/3
-seeds). One double-DQN update: **~3.4 ms** fastsim/adjoint vs **~20.5 s**
-`EstimatorQNN`/param-shift.
+Two honest v2 regressions. **gp:** the greedy policy peaks *early* (the
+bundled snapshot is from episode ≈ 250, reached during high-epsilon
+exploration) and continued training degrades it rather than improving it —
+recipe grids over epsilon decay, gamma, and warm-starting from the v1
+weights all failed to beat that peak, so the quantum gp lap is now well
+behind the MLP's (27.8 vs 20.3 s; under v1 they were at parity). **combo:**
+fresh 4-qubit training never laps at all under v2; the bundled driver is a
+warm-started migration of the v1 weights (6/6 greedy at 27.5 s), which
+still beats the fresh-trained MLP (30.8 s).
+
+Warm-start live demo: from the bundled pre-first-lap checkpoints the quantum
+agent reaches its first clean lap in **~2.2 s** of training on the oval,
+**~2.7 s** on the chicane, and **~9 s** on combo (seed-0 verification runs);
+gp's warm recipe is currently *not* reliable under v2 (no seed lapped within
+500 warm episodes — the fresh run's high-epsilon peak cannot be retraced at
+low epsilon), which the config notes honestly. One double-DQN update:
+**~3.4 ms** fastsim/adjoint vs **~20.5 s** `EstimatorQNN`/param-shift.
 
 ### Scaling the qubit count
 
@@ -130,41 +156,32 @@ the default stays 4 and is bit-identical to the pre-scaling stack, pinned by
 a regression test). Extra qubits widen the *feature* register — by default
 n − 1 lidar rays evenly spaced over [−60°, +60°] plus speed, one feature per
 qubit — while the 4 actions and the Z_0…Z_3 readout stay fixed. Trained
-6-qubit weights ship for the oval (`quantum_oval_q6.npz`: seed 42, 600
-episodes, best greedy-eval lap 14.7 s over 24 laps) and the chicane
-(`quantum_chicane_q6.npz`: 14.8 s, 6/6 greedy laps), plus a pre-first-lap
-oval warm-start checkpoint (`quantum_oval_warmstart_q6.npz`); `q8`/`q10` are
-config options whose training histories live in `data/histories/` but whose
-weights are not bundled. Measured on the oval (greedy eval, 6 standing-start
-episodes per seed; campaign of 3–5 seeds per variant):
+weights now ship for **oval and chicane at every size** (`quantum_<track>_q6/
+q8/q10.npz`), plus a pre-first-lap oval warm-start checkpoint and evolution
+stages at q6, so the live Qubits selector works out of the box on those
+tracks. Measured on the oval (greedy best-snapshot eval, seed 42, physics
+v2):
 
 | | 4 qubits | 6 qubits | 8 qubits | 10 qubits |
 |---|---|---|---|---|
 | Lidar rays (plain profile) | 3 | 5 | 7 | 9 |
 | Trainable parameters | 56 | 80 | 104 | 128 |
-| First clean lap (episode, seed range) | ≈ 300 | 286–352 | 226–465 | 190–259 |
-| Best greedy lap | 14.4 s | 14.7 s | 14.0 s | 13.7 s |
-| Greedy-eval robustness | bundled, robust | 3/3 seeds lap (14.7/15.4/16.0 s) | 4/5 lap 6/6 (14.0/14.5/16.2/16.3 s); one seed 0/6 | 3/4 lap 6/6 (13.7/14.8/16.2 s); one seed 3/6 |
+| First clean lap (episode) | ≈ 381 | ≈ 392 | ≈ 202 | ≈ 358 |
+| Best greedy lap | 14.1 s | 13.3 s | 13.3 s | **12.0 s** |
 | ms per greedy decision (fastsim) | < 1 | 0.6–1 | 1.2–2 | 4.6–8.7 |
 
-The honest reading: sample efficiency per *episode* is roughly flat from 4
-to 10 qubits — a real scaling data point, not a success story. The best q8
-and q10 laps edge ahead of the 4-qubit 14.4 s, but with a wide seed spread
-(one q8 seed never laps the greedy eval at all); what grows reliably is
-per-decision compute, since the statevector goes 16 → 1024 amplitudes.
-Under 1024-shot Aer sampling the evaluated 8-qubit policy still laps 6/6
-(14.5 s, ~18 ms/decision); the evaluated 10-qubit seed — already the least
-robust in fastsim at 3/6 — stays at 3/6 (16.1 s, ~24 ms/decision). The
-fastsim/`EstimatorQNN` parity and gradient checks run at 6 qubits too
-(forward agreement ≤ 1e-9; all 80 gradients verified against finite
-differences), and the dead-parameter teaching point above holds at any n.
-
-Scaling also produced an honest failure: on the hard gp track, the plain
-5-ray `q6` profile **fails greedy eval on every seed** (0/6, 0/6, 1/6 laps
-after 2000 episodes) even though the 4-qubit default laps gp 6/6 at 20.4 s —
-more rays alone *regressed* the hard track. `quantum_gp_q6.npz` is therefore
-deliberately not bundled. Engineered observations restored it — next
-subsection.
+The honest reading: sample efficiency per *episode* stays roughly flat from
+4 to 10 qubits (first clean lap between episode ~200 and ~515 across all
+sizes and both tracks) — a real scaling data point, not a success story.
+Under v2 the wider registers do convert into faster laps on the easy tracks
+(the 9-ray q10 driver's 12.0 s is the fastest quantum lap in the demo), but
+what grows reliably is per-decision compute, since the statevector goes
+16 → 1024 amplitudes. The fastsim/`EstimatorQNN` parity and gradient checks
+run at 6 qubits too (forward agreement ≤ 1e-9; all 80 gradients verified
+against finite differences), and the dead-parameter teaching point above
+holds at any n. gp and combo remain deliberately untrained above 4 qubits
+(the v1 campaign showed more rays alone *regressing* gp; under v2 gp is
+fragile even at 4 qubits, so we have not spent the compute).
 
 ### Observation engineering
 
@@ -182,49 +199,50 @@ engineered scalars, one feature per qubit, all normalized to [0, 1]:
   analysis as notebook 01; derivation in the `racing_env.py` docstring) —
   “am I too fast for the corner coming up?”
 
-Measured variants (same DQN hyperparameters as the plain runs, 3 seeds,
-greedy eval with 6 standing-start episodes):
+Measured variants on the oval (same DQN hyperparameters as the plain runs;
+physics v2, seed 42, greedy best-snapshot eval):
 
 - **`q6feat`** (80 params: 3 rays + speed + curvature_ahead +
-  corner_speed_ratio), oval: best laps **13.7/13.8/13.8 s** across seeds
-  (6/6, 4/6, 6/6 episodes lapped) — faster than plain q6 (14.7 s) *and* the
-  4-qubit default (14.4 s). On the chicane: 13.9–15.8 s across seeds. On gp
-  (`featgp`): laps 5/6 at 23.3 s and 4/6 at 23.1 s on two seeds, 0/6 on the
-  third — restoring the track that plain 5-ray q6 lost entirely, though
-  slower than the 4-qubit default (20.4 s) or the MLP (19.2 s).
-- **`q8feat`** (104: adds lateral_offset + heading_error), oval:
-  **13.6/13.8/13.9 s, all seeds 6/6** — 13.6 s is the best quantum lap in
-  this project.
-- **`q10feat`** (128: 5 rays + speed + all four features), oval: 14.2 s
-  (one seed 6/6, one 1/6; only 2 seeds run) — the trend does not continue.
+  corner_speed_ratio): 13.2 s — a hair faster than plain q6 (13.3 s).
+- **`q8feat`** (104: adds lateral_offset + heading_error): **12.5 s** vs
+  plain q8's 13.3 s — the clearest feature win at v2.
+- **`q10feat`** (128: 5 rays + speed + all four features): 13.5 s vs plain
+  q10's 12.0 s — at ten qubits the 9-ray observation wins; the feature
+  advantage does not continue up the scale (same qualitative finding as
+  under v1 physics).
 
-The curious part is an **asymmetry**: identical features do *not* help the
-matched MLP baselines. On the oval the rays-only MLPs run 13.5–14.1 s
-(92/108/124 params at the q6/q8/q10 observation widths, all seeds 6/6,
-~0.01 ms/decision) while the feature-observation MLP (`mlp_featoval_q6`)
-runs 14.1–14.6 s — the features made the classical baseline *slower* and
-the quantum circuit *faster*. We flag this explicitly as an open
-observation, not a claim: it rests on one environment, 3 seeds per variant,
-and no per-variant hyperparameter search; a plausible mundane explanation
-(smooth low-dimensional scalars may simply suit the RY-angle encoding
-better than ray geometry) is untested. Notebook 06 has the learning curves
-and the full comparison.
+The **asymmetry** we observed under v1 persists in weakened form: the same
+features do not help the matched MLP baselines (92/108/124 params at the
+q6/q8/q10 observation widths, rays-only greedy laps 12.5/12.3/11.9 s,
+~0.01 ms/decision; the feature-observation MLP at the q6 width runs 13.0 s —
+slower than its 12.5 s rays-only twin). We flag this as an open observation,
+not a claim: it rests on one environment, few seeds, and no per-variant
+hyperparameter search; a plausible mundane explanation (smooth
+low-dimensional scalars may simply suit the RY-angle encoding better than
+ray geometry) is untested. Note the parity headline hiding in those numbers:
+at the q10 observation the MLP's 11.9 s vs quantum's 12.0 s is the closest
+the two stacks have ever been. Notebook 06 has the learning curves and the
+full comparison (v1-physics campaign; re-execution under v2 refreshes the
+plotted histories).
 
 ### One driver, every track (cross-track generalization)
 
 Because the observation is egocentric (lidar rays + speed, no absolute
 position), a trained policy is not tied to its training track. Measured
-zero-shot (greedy, no fine-tuning): the gp-trained 4-qubit specialist laps
-oval (15.8 s), chicane (16.1 s) and 10/10 unseen procedurally generated
-tracks at difficulty 0.5 (best 11.3 s, median 25.9 s); oval/chicane
-specialists lap each other's tracks but fail gp (0/6). Training one circuit
-on all three tracks round-robin (`--track multi`, 2500 episodes) produced
-the bundled **`quantum_universal.npz`** (seed 42): oval 14.3 s, chicane
-14.8 s, gp 25.7 s (vs the specialist's 20.4 s), 10/10 generated tracks at
-difficulty 0.5, 7/10 at 0.8. Seed-honesty: seeds 0 and 1 of the same recipe
-failed to generalize to gp (0/6); training purely on pools of generated
-tracks (`--track random`) was strictly worse on the bundled tracks. All
-learning curves are in `data/histories/` (`multi_*`, `random_*`).
+zero-shot under v2 (greedy, no fine-tuning): the gp-trained 4-qubit
+specialist laps the oval (14.1 s, 23 laps in 6 episodes) — though under v2
+it no longer transfers to the chicane (0/6). The bundled
+**`quantum_universal.npz`** is now a *warm migration*: the v1 universal
+driver fine-tuned on the four-track round-robin under the new physics
+(3000 episodes, seed 42). It laps everything — oval 13.0 s, chicane 13.3 s,
+gp 30.3 s, combo 52.3 s — and 10/10 unseen generated tracks at difficulty
+0.5 (best 23.0 s). Seed-honesty: *fresh* multi-track training under v2 does
+not produce a fully universal driver anymore — four runs tried (seeds 42,
+0, 1, 7, one of them 5000 episodes); the best of them laps oval/chicane
+and 9–10/10 generated tracks but fails gp and combo outright (the same gp
+fragility as the specialist story above). Knowledge transfer across a
+physics change is what preserved universality, which is a nice RL lesson in
+itself. All learning curves are in `data/histories/` (`uni2_*`).
 
 ### The ceiling: a model-based reference driver
 
@@ -234,25 +252,28 @@ racing lines from the track geometry (curve-shortening flow, blended wide
 through slow corners), derives brake/accelerate-feasible speed profiles from
 the `[physics]` constants, *simulates itself* on each candidate with the real
 car physics, and drives the fastest provably crash-free combination with
-continuous steering (pure pursuit). Measured: oval 13.8 s, chicane 13.9 s,
-gp 18.2 s, combo 20.3 s — ahead of every learned agent wherever braking and
-line choice matter (on the flat-out oval the big trained MLP ties it to
-within 0.03 s: that track is pure path geometry). Two useful facts follow. First, the RL agents' gap to this ceiling is
-mostly their action set: they steer with 4 bang-bang actions at 10 Hz, the
-hero steers continuously — on gp that is worth 2 s per lap (18.2 vs 20.4).
-Second, capacity is not the constraint — an MLP with 8× the parameters
-(hidden width 64, 580 params) trained on the same recipe laps the oval in
-14.2 s, no better than the 76-parameter one. The expert menu's **pro**
-driver takes that question to its limit: the same double-DQN recipe as every
-agent in the demo, with a wide MLP (hidden 128, 2,436 params) and the rich
-14-feature observation (9 rays + speed + 4 track scalars), trained on all
-four tracks at once (`mlp_pro.npz`, seed 42 of 3 — the other seeds crash
-gp). Measured: 13.8 / 13.9 / 18.9 / 21.2 s and 10/10 generated tracks — the
-strongest learned driver we have, and still a second-plus behind the hero
-wherever control quality matters. The remaining gap is dominated by the
-4-action interface, not model size. Hero and pro
-laps are excluded from ghost records — records stay with the standard demo
-agents (and humans).
+continuous steering (pure pursuit). Because everything derives from the
+`[physics]` constants, the hero adapted to the v2 physics with no retraining.
+Measured: oval 12.1 s, chicane 12.1 s, gp 16.4 s, combo 19.0 s — ahead of
+every learned agent wherever braking and line choice matter. Two useful
+facts follow. First, the RL agents' gap to this ceiling is mostly their
+action set: they steer with 4 bang-bang actions at 10 Hz, the hero steers
+continuously — on gp that is now worth over 10 s per lap for the 4-qubit
+circuit (16.4 vs 27.8) and ~1.4 s for the strongest MLP. Second, capacity
+alone is not the constraint at baseline scale, but the expert menu's **pro**
+driver shows what capacity plus rich sensing buys: the same double-DQN
+recipe as every agent in the demo, with a wide MLP (hidden 128, 2,436
+params) and the 14-feature observation (9 rays + speed + 4 track scalars),
+trained fresh on all four tracks at once for 5000 episodes (`mlp_pro.npz`,
+seed 0; the 3000-episode recipe that sufficed under v1 fails gp under v2).
+Measured: 11.9 / 12.4 / 17.8 / 20.4 s and 10/10 generated tracks — the
+strongest learned driver we have. It even edges the hero on the flat-out
+oval by 0.2 s (that track is pure path geometry, and the bang-bang zigzag
+traces a fractionally shorter path than smooth line-tracking — documented as
+a near-tie, not chased further), while trailing by 1–1.4 s everywhere
+control quality matters. The remaining gap is dominated by the 4-action
+interface, not model size. Hero and pro laps are excluded from ghost
+records — records stay with the standard demo agents (and humans).
 
 ## Honest claims
 

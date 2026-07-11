@@ -1,13 +1,7 @@
 {
   "agent": "quantum",
   "track": "oval",
-  "config_hash": "2340f5f7232e",
-  "n_qubits": 6,
-  "params": 80,
-  "seed": 42,
-  "episodes": 600,
-  "eval_episodes": 8,
-  "eval_laps": 24,
-  "eval_best_lap": 14.7,
-  "date": "2026-07-10"
+  "config_hash": "234c2c4c6773",
+  "episodes": 800,
+  "date": "DATE"
 }

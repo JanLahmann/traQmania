@@ -99,6 +99,8 @@ export const setTrack = (track, seed, length) => {
   send("set_track", msg);
 };
 export const setQubits = (n) => send("qubits", { n });
+export const drawTrack = (points) => send("draw_track", { points });
+export const setName = (name) => send("set_name", { name });
 /** Pick which training's quantum weights drive the agent ("auto" = per-track). */
 export const setDriver = (driver) => send("set_driver", { driver });
 

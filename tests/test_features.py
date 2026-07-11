@@ -58,10 +58,12 @@ def obs_at(env, indices, **kwargs):
 
 # ------------------------------------------------- default = historical obs
 
-# Observations of RacingEnv(oval, load_config(), n_envs=3, seed=123) captured
-# on main BEFORE the features generalization: at reset and after holding
-# BASELINE_ACTIONS (one row of np.full(3, a) per entry).  The default config
-# must reproduce them bit-identically.
+# Observations of RacingEnv(oval, load_config(), n_envs=3, seed=123): at reset
+# and after holding BASELINE_ACTIONS (one row of np.full(3, a) per entry).  The
+# default config must reproduce them bit-identically — this pins the whole obs
+# pipeline (raycast, normalization, feature order) against accidental drift.
+# Captured under the v2 physics constants (accel 11 / brake 16 / v_max 25);
+# recapture deliberately whenever [physics] changes.
 BASELINE_ACTIONS = [1, 1, 2, 0, 3, 1, 1, 2, 1, 1]
 BASELINE_RESET = np.array([
     [0.28567871264882555, 1.0, 0.25293494075766737, 0.0],
@@ -69,9 +71,9 @@ BASELINE_RESET = np.array([
     [0.2348693520198997, 1.0, 0.30323969932433464, 0.0],
 ])
 BASELINE_AFTER = np.array([
-    [0.3151179032426825, 1.0, 0.23146381587323053, 0.25956627750041883],
-    [0.22440470345266988, 1.0, 0.3120841158129513, 0.25956627750041883],
-    [0.2732786378383157, 1.0, 0.2740512451705508, 0.25956627750041883],
+    [0.32289711873875865, 1.0, 0.22730480605984776, 0.2828530004214067],
+    [0.23046735526420617, 1.0, 0.3070802860167461, 0.2828530004214067],
+    [0.2836001175591802, 1.0, 0.2682236689494815, 0.2828530004214067],
 ])
 
 

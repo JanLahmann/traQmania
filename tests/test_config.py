@@ -11,7 +11,7 @@ def test_profile_overlay():
     config = load_config(profile="pi5")
     assert config["training"]["batch_size"] == 16      # overlaid
     assert config["training"]["warm_start"] is True    # overlaid
-    assert config["physics"]["v_max"] == 22.0          # inherited
+    assert config["physics"]["v_max"] == 25.0          # inherited
 
 
 def test_unknown_profile_raises():

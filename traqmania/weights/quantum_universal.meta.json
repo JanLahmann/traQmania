@@ -1,15 +1,14 @@
 {
   "agent": "quantum",
   "track": "universal",
-  "config_hash": "f0d116a00db4",
   "episodes": 3000,
-  "date": "DATE",
-  "provenance": "best-snapshot of --track multi (oval+chicane+gp+combo round-robin), seed 0, 3000 episodes, gamma 0.99, epsilon decay 1500 (universal v2; all 3 seeds of this recipe lap all four bundled tracks)",
+  "date": "2026-07-11",
+  "provenance": "best-snapshot of --track multi (oval+chicane+gp+combo round-robin), seed 42, 3000 episodes, gamma 0.99, epsilon decay 1500, warm-started from the physics-v1 universal weights (universal v3 for physics v2: fresh multi training laps at most 2-3 of the 4 tracks under the new physics; the warm migration is what keeps it fully universal)",
   "greedy_eval": {
-    "oval": "best 15.1s",
-    "chicane": "best 15.4s",
-    "gp": "best 21.7s",
-    "combo": "best 26.8s",
-    "generated_d0.5": "10/10, best 14.4s median 35.2s"
+    "oval": "best 13.0s",
+    "chicane": "best 13.3s",
+    "gp": "best 30.3s (slow but laps)",
+    "combo": "best 52.3s (slow but laps)",
+    "generated_d0.5": "10/10, best 23.0s"
   }
 }

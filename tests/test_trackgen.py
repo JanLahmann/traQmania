@@ -200,7 +200,9 @@ def test_multi_track_env_crash_routing(config):
     assert done is not None and done[0], "env 0 never crashed"
     np.testing.assert_array_equal(done, [True, False, False, False])
     np.testing.assert_array_equal(info["off_track"], [True, False, False, False])
-    assert info["progress"][0] > 0.0
+    # Hard steering from a standing start curls the car; net progress can be
+    # either sign — what matters is that it was tracked for the crashed env.
+    assert info["progress"][0] != 0.0
     np.testing.assert_array_equal(info["progress"][1:], 0.0)
     # The braked envs (including env 2, sharing env 0's track) are untouched.
     after = env.state_snapshot()["state"]

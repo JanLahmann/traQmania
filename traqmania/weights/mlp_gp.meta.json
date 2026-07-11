@@ -1,7 +1,7 @@
 {
   "agent": "mlp",
   "track": "gp",
-  "config_hash": "4e85615b859c",
-  "episodes": 800,
+  "config_hash": "9a830fea72fd",
+  "episodes": 2000,
   "date": "DATE"
 }

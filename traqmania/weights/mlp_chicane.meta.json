@@ -1,7 +1,7 @@
 {
   "agent": "mlp",
   "track": "chicane",
-  "config_hash": "4e85615b859c",
-  "episodes": 400,
+  "config_hash": "28c95c35a3c5",
+  "episodes": 800,
   "date": "DATE"
 }

@@ -1,0 +1,11 @@
+{
+  "agent": "quantum",
+  "track": "combo",
+  "config_hash": "28c95c35a3c5",
+  "episodes": 600,
+  "stage": 4,
+  "eval_episodes": 4,
+  "eval_laps": 6,
+  "eval_best_lap": 27.5,
+  "date": "2026-07-11"
+}

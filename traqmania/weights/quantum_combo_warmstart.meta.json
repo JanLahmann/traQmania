@@ -1,7 +1,8 @@
 {
   "agent": "quantum",
   "track": "combo",
-  "episodes": 700,
-  "date": "DATE",
-  "provenance": "pre-first-lap warm-start checkpoint (700 ep, seed 7, combo preset schedule; combo's first clean lap needs ~1100 ep)"
+  "config_hash": "28c95c35a3c5",
+  "episodes": 100,
+  "date": "2026-07-11",
+  "provenance": "pre-lap checkpoint (ep 50 of the v1-warm-migrated combo fine-tune; fresh combo training never laps under physics v2)"
 }

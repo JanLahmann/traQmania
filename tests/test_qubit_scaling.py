@@ -141,13 +141,15 @@ REGRESSION_OBS = np.array(
         [0.33, 0.66, 0.05, 0.50],
     ]
 )
-# Q-values of the bundled oval weights on REGRESSION_OBS, captured on main
-# BEFORE the n_qubits generalization — n=4 must stay bit-identical.
+# Q-values of the bundled oval weights on REGRESSION_OBS — pins the 4-qubit
+# circuit evaluation (encoding, layers, readout, output head) bit-identically.
+# Recapture deliberately whenever the bundled oval weights are retrained
+# (last: physics-v2 migration, 2026-07-11).
 REGRESSION_Q = np.array(
     [
-        [191.5449488526533, 185.5949295753721, 186.2008782112444, 193.42539604236663],
-        [190.53311752642043, 36.37641532745649, 178.15811311295226, 172.1771555388296],
-        [206.59007108817428, 206.3428989297937, 201.7028756510693, 195.93719008817874],
+        [68.06803869594201, 76.21289851315879, 80.22702936590072, 75.7663666870574],
+        [49.32902103558478, 58.62649143055562, 81.20798678892838, 57.03215742247623],
+        [83.56407478492376, 89.77840852878973, 71.24232967208826, 81.11274348214818],
     ]
 )
 

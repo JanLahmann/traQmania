@@ -1,0 +1,11 @@
+{
+  "agent": "quantum",
+  "track": "oval",
+  "config_hash": "d0034ff13cf4",
+  "episodes": 550,
+  "stage": 4,
+  "eval_episodes": 4,
+  "eval_laps": 16,
+  "eval_best_lap": 13.3,
+  "date": "2026-07-11"
+}

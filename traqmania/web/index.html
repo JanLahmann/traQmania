@@ -24,6 +24,8 @@
     </label>
     <button type="button" id="track-reroll" class="reroll-btn" title="New random track"
             aria-label="New random track" hidden>🎲</button>
+    <button type="button" id="track-draw" class="reroll-btn" title="Draw your own track"
+            aria-label="Draw your own track">✏️</button>
     <input type="text" id="track-seed" class="seed-input" inputmode="numeric"
            placeholder="seed" aria-label="Random track seed" hidden
            title="Type a saved seed and press 🎲 (or Enter) to reload that exact track; leave empty for a fresh one">
@@ -58,12 +60,16 @@
           <option value="mlp">MLP</option>
         </select>
       </label>
+      <input type="text" id="race-name" maxlength="24" placeholder="your name"
+             title="Clean laps under this name enter the leaderboard — leave empty to race off the record">
       <button id="race-start" class="accent-btn">Start</button>
       <button id="race-reset">Reset</button>
     </div>
 
     <div class="spacer"></div>
     <div id="gamepad-pill" class="pill pill-pad" hidden>🎮 controller active</div>
+    <div id="control-pill" class="pill" hidden
+         title="One visitor at a time controls the shared demo; the wheel frees up after ~90 s of driver inactivity"></div>
     <div id="status-pill" class="pill pill-off">connecting…</div>
   </header>
 
@@ -82,6 +88,7 @@
       <nav class="tabs" id="sidebar-tabs" aria-label="Panels">
         <button data-tab="quantum" class="tab-btn active">Quantum</button>
         <button data-tab="training" class="tab-btn">Training</button>
+        <button data-tab="board" class="tab-btn">🏆</button>
         <button data-tab="hardware" class="tab-btn">Hardware</button>
         <button data-tab="explain" class="tab-btn">Explain</button>
       </nav>
@@ -173,6 +180,17 @@
         </div>
         <h2>Sprint loss</h2>
         <canvas id="hw-loss-chart" width="340" height="160"></canvas>
+      </div>
+
+      <div class="panel" id="panel-board">
+        <h2>Leaderboard — <span id="board-track">…</span></h2>
+        <p class="hint">Clean race laps under a name (enter it next to Start)
+        make the board. The AI drivers' best laps are shown for comparison —
+        they race, but they don't rank.</p>
+        <ol id="board-entries" class="board-list"></ol>
+        <p class="hint" id="board-empty">No named laps yet — be the first.</p>
+        <h2>Reference drivers</h2>
+        <div id="board-references"></div>
       </div>
 
       <div class="panel" id="panel-explain"></div>

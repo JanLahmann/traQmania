@@ -68,7 +68,7 @@ flowchart LR
 | `traqmania/server/protocol.py` | Typed WS messages; strict client-side validation (`ProtocolError`). |
 | `traqmania/server/session.py` | `DemoSession`: the mode state machine and synchronous 60 Hz `tick()`; training threads; ghost recording. |
 | `traqmania/server/runtime.py` | Loading bundled agents/weights/tracks/ghosts, track payloads, training-config resolution. |
-| `traqmania/server/ws.py` | Connection `Hub`, broadcast fan-out, per-socket receive loop. |
+| `traqmania/server/ws.py` | Connection `Hub`, broadcast fan-out, per-socket receive loop, `DriverLock` (exclusive control, spectators watch). |
 | `traqmania/server/app.py` | FastAPI factory: `/health`, `/ws`, `/api/docs` + `/api/docs/{id}` (repo markdown for the in-UI docs browser; empty outside a source checkout) and `/docs-assets` (images), static frontend mounted last. |
 | `traqmania/train_headless.py` | Offline training CLI that produces the bundled `weights/*.npz` (+ `.meta.json`, history JSON). Besides the bundled names, `--track multi` trains one policy on the oval+chicane+gp mixture and `--track random` on a `MultiTrackEnv.random_pool` of generated tracks (seeded from `--seed`); weights save under the literal names (`quantum_multi.npz` / `quantum_random.npz`) — the universal-driver candidates. |
 | `traqmania/bench.py` | Micro-benchmarks (env steps, forward passes, DQN updates). |
@@ -180,6 +180,18 @@ live driving only (laps can exceed the 60 s training-episode cap). Rejected
 with an `error` while training or a hardware job is running, or for unknown
 names.
 
+**`draw_track`** — `{points}` with `points` a list of 8–5000 `[x, y]` pairs:
+a freehand centerline stroke from the UI's ✏️ draw overlay (world
+coordinates, any scale). `env/trackgen.track_from_drawing` recentres and
+rescales it to a drivable perimeter, low-passes pointer jitter (coarse
+arc-length resample) and Chaikin-rounds the corners just enough to clear the
+6-unit minimum corner radius, narrows the track a little if two sections run
+close, and finally constructs it through the same `Track` path as every other
+track. The result is named `drawn #<n>` and behaves like a generated track
+(universal-driver fallback, no ghost persistence). Drawings that cannot be
+made drivable — open strokes, self-crossings, unrecoverably tight corners —
+come back as an `error` naming what to fix; drawing again is the adjust flow.
+
 **`set_driver`** — `{driver}`: pick which trained quantum weights drive the
 agent car. `"auto"` (default) uses the current track's specialist with the
 honest universal/gp fallback on generated tracks; a training name from
@@ -244,6 +256,23 @@ counts, readout observables). `ui` is the `[ui]` config section
 (`attract_idle_seconds`, `kiosk`). `obs_labels` (*omitted-if-null*) is the
 display name of each observation feature feeding the circuit, in qubit order
 (`env.feature_names`, e.g. `["ray -60°", "ray 0°", "ray +60°", "speed"]`).
+
+**`control`** — `{driving, locked, watchers, waiting, queue_pos,
+turn_ends_in_s}`, per-client driver-lock + turn-queue status. One client at a
+time controls the shared session: the first to send any control message
+takes the wheel; anyone else who interacts joins a FIFO line (their control
+messages are dropped and answered with this status). A solo driver keeps the
+wheel indefinitely, but while the line is non-empty a turn lasts at most
+`[server].driver_turn_s` (default 120 s); the wheel also frees after
+`[server].driver_idle_s` (default 90 s) of driver inactivity or on
+disconnect — a 1 Hz ticker (`ws.control_ticker`) performs the handover to
+the next in line and keeps countdowns fresh. `driving` = this client holds
+the wheel; `locked` = someone does; `watchers` = other connected clients;
+`waiting` = line length; `queue_pos` (*null when not queued*) = this
+client's 1-based place; `turn_ends_in_s` (*null when nobody waits*) = the
+running countdown. Protects public deployments and exhibit screens from
+visitors' phones fighting over the demo — and turns contention into an
+arcade-style rotation.
 
 **`track`** — `{track: TrackPayload}` after a successful track switch.
 

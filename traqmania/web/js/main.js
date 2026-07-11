@@ -7,6 +7,7 @@ import { QuantumPanel } from "./quantum-panel.js";
 import { renderCircuit } from "./circuit.js";
 import { TrainingChart, LapChart } from "./charts.js";
 import { AttractManager } from "./attract.js";
+import { initDraw } from "./draw.js";
 import { initExplain } from "./explain.js";
 import { initHardwarePanel } from "./hardware-panel.js";
 
@@ -112,7 +113,19 @@ function applyTrack(payload) {
   const isRandom = payload.name.startsWith("random #");
   const randomOpt = sel.querySelector('option[value="random"]');
   if (randomOpt) randomOpt.textContent = isRandom ? `🎲 ${payload.name}` : "🎲 random";
-  const value = isRandom ? "random" : payload.name;
+  // Drawn tracks ("drawn #N") live in a transient picker entry of their own.
+  const isDrawn = payload.name.startsWith("drawn #");
+  let drawnOpt = sel.querySelector('option[value="drawn"]');
+  if (isDrawn && !drawnOpt) {
+    drawnOpt = document.createElement("option");
+    drawnOpt.value = "drawn";
+    sel.append(drawnOpt);
+  }
+  if (drawnOpt) {
+    if (isDrawn) drawnOpt.textContent = `✏️ ${payload.name}`;
+    else drawnOpt.remove();
+  }
+  const value = isRandom ? "random" : isDrawn ? "drawn" : payload.name;
   if (sel.value !== value) sel.value = value;
   $("#track-reroll").hidden = !isRandom;
   const seedInput = $("#track-seed");
@@ -325,6 +338,55 @@ net.on("welcome", (msg) => {
 
 net.on("track", (msg) => applyTrack(msg.track));
 
+// Leaderboard: ranked named human laps + unranked AI reference rows.
+net.on("leaderboard", (msg) => {
+  $("#board-track").textContent = msg.track;
+  const entries = $("#board-entries");
+  entries.innerHTML = msg.entries
+    .map((e) => `<li><span class="board-name">${escapeHtml(e.name)}</span>
+      <b>${e.lap_s.toFixed(2)}s</b><span class="board-date">${e.date || ""}</span></li>`)
+    .join("");
+  $("#board-empty").hidden = msg.entries.length > 0;
+  $("#board-references").innerHTML = msg.references
+    .map((r) => `<div class="board-ref">
+      <span class="dot" style="background:${KIND_COLORS[r.kind] || "#ccc"}"></span>
+      <span>${KIND_NAMES[r.kind] || r.kind}</span>
+      <span class="board-driver">${escapeHtml(r.driver)}</span>
+      <b>${r.lap_s.toFixed(2)}s</b>
+    </div>`)
+    .join("") || '<p class="hint">No reference laps on this track yet.</p>';
+});
+
+function escapeHtml(text) {
+  const div = document.createElement("div");
+  div.textContent = text;
+  return div.innerHTML;
+}
+
+// Driver lock + turn queue: one client controls the shared session at a
+// time; interacting while someone else drives joins the waiting line, and
+// turns are time-limited only while the line is non-empty.
+net.on("control", (msg) => {
+  const pill = $("#control-pill");
+  let text = null;
+  if (msg.driving) {
+    if (msg.turn_ends_in_s != null) {
+      text = `🏎️ your turn · ${msg.turn_ends_in_s}s left · ${msg.waiting} waiting`;
+    } else if (msg.watchers > 0) {
+      text = `🏎️ you have the wheel · ${msg.watchers} watching`;
+    }
+  } else if (msg.queue_pos != null) {
+    const ahead = msg.queue_pos - 1;
+    text = ahead === 0
+      ? `⏳ you're next · your turn in ~${msg.turn_ends_in_s ?? "?"}s`
+      : `⏳ in line — ${ahead} ahead of you`;
+  } else if (msg.locked) {
+    text = "👀 spectating — press any control to get in line";
+  }
+  pill.hidden = text === null;
+  if (text !== null) pill.textContent = text;
+});
+
 net.on("state", (msg) => {
   state.lastState = msg;
   renderer.pushState(msg);
@@ -414,7 +476,7 @@ for (const btn of document.querySelectorAll(".tab-btn")) {
 // track payload carries the seed in its name. Changing length regenerates.
 $("#track-select").addEventListener("change", (ev) => {
   if (ev.target.value === "random") requestRandomTrack();
-  else net.setTrack(ev.target.value);
+  else if (ev.target.value !== "drawn") net.setTrack(ev.target.value); // "drawn" IS the current track
 });
 $("#track-reroll").addEventListener("click", requestRandomTrack);
 $("#track-seed").addEventListener("keydown", (ev) => {
@@ -431,6 +493,7 @@ $("#driver-select").addEventListener("change", (ev) => {
 });
 
 $("#race-start").addEventListener("click", () => {
+  net.setName($("#race-name").value.trim()); // leaderboard name for this stint
   net.raceCmd("start", $("#race-opponent").value, state.trackName || undefined);
 });
 $("#race-reset").addEventListener("click", () => {
@@ -475,6 +538,15 @@ function updateTrainStats(msg) {
   );
   $("#train-stats").innerHTML = rows.join("");
 }
+
+// -- draw-a-track ----------------------------------------------------------------
+
+initDraw({
+  button: $("#track-draw"),
+  stage: $("#stage"),
+  getTransform: () => renderer.transform,
+  submit: (points) => net.drawTrack(points),
+});
 
 // -- sidebar resize ------------------------------------------------------------
 

@@ -36,7 +36,7 @@ def test_qn_profile_overlay_and_env_features(profile, n_qubits, rays):
     assert np.allclose(np.diff(rays), 120.0 / (n_qubits - 2))  # evenly spaced
     # everything else inherits from default.toml
     assert config["circuit"]["n_layers"] == 4
-    assert config["physics"]["v_max"] == 22.0
+    assert config["physics"]["v_max"] == 25.0
 
     env = make_env(config)
     assert env.n_features == n_qubits

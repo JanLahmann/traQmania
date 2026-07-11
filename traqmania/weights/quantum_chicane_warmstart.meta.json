@@ -1,7 +1,8 @@
 {
   "agent": "quantum",
   "track": "chicane",
-  "config_hash": "4e85615b859c",
-  "episodes": 250,
-  "date": "DATE"
+  "config_hash": "8859ff42f92f",
+  "episodes": 550,
+  "provenance": "pre-first-lap checkpoint (make_stages warmstart export)",
+  "date": "2026-07-11"
 }
