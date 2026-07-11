@@ -16,13 +16,12 @@ def client():
 def test_docs_index_lists_repo_docs(client):
     docs = client.get("/api/docs").json()["docs"]
     ids = [d["id"] for d in docs]
-    # in a source checkout the QML story (SCIENCE) leads; every entry has a
-    # human title parsed from the first heading
+    # in a source checkout the README (traQmania) leads; every entry carries
+    # its curated menu title, and the parked TM2020 concept stays off the menu
     if not discover_docs():
         assert docs == []  # bare install: feature reports empty, UI hides it
         return
-    assert ids[0] == "SCIENCE"
-    assert "README" in ids
+    assert ids == ["README", "EXHIBITION", "SCIENCE", "ARCHITECTURE"]
     assert all(d["title"] for d in docs)
 
 

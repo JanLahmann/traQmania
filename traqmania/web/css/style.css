@@ -50,6 +50,14 @@ h2 {
   margin: 4px 0 10px;
 }
 
+a {
+  color: #6ea6ff; /* readable link blue on the dark background */
+}
+
+a:hover {
+  color: #9cc2ff;
+}
+
 button {
   font: inherit;
   color: var(--text);
@@ -196,7 +204,7 @@ input[type="number"],
 
 #layout {
   display: grid;
-  grid-template-columns: 1fr 380px;
+  grid-template-columns: 1fr var(--sidebar-w, 380px);
   min-height: 0;
 }
 
@@ -316,11 +324,30 @@ input[type="number"],
 /* -- sidebar ----------------------------------------------------------------- */
 
 #sidebar {
+  position: relative;
   display: flex;
   flex-direction: column;
   border-left: 1px solid var(--border);
   background: var(--bg-panel);
   min-height: 0;
+  min-width: 0;
+}
+
+/* drag handle on the sidebar's left edge (wider docs reading, etc.) */
+#sidebar-resizer {
+  position: absolute;
+  left: -4px;
+  top: 0;
+  bottom: 0;
+  width: 9px;
+  cursor: col-resize;
+  z-index: 6;
+}
+
+#sidebar-resizer:hover,
+#sidebar-resizer.dragging {
+  background: var(--quantum);
+  opacity: 0.35;
 }
 
 .tabs {
@@ -639,9 +666,23 @@ input[type="number"],
 
 /* -- docs browser (Explain -> Documentation) -------------------------------- */
 
-.doc-picker {
+.doc-nav {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
   margin-bottom: 12px;
-  max-width: 100%;
+}
+
+.doc-nav button {
+  font-size: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+}
+
+.doc-nav button.active {
+  background: var(--quantum);
+  border-color: var(--quantum);
+  color: #fff;
 }
 
 .doc-note {
@@ -839,6 +880,10 @@ body.kiosk .caption {
   #sidebar {
     border-left: none;
     border-top: 1px solid var(--border);
+  }
+
+  #sidebar-resizer {
+    display: none; /* stacked layout: nothing to drag sideways */
   }
 
   body {

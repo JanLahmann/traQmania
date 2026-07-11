@@ -375,7 +375,15 @@ class DemoSession:
         """Why the bundled ``kind`` weights cannot drive the current track (or None)."""
         if kind == "quantum":
             path = self._quantum_weights_path()
-            return None if path.is_file() else f"missing weights '{path.name}'"
+            if path.is_file():
+                return None
+            trained = [name for name in ("oval", "chicane", "gp", "combo", "universal")
+                       if quantum_weights_path(name, self.n_qubits).is_file()]
+            hint = (f"bundled at {self.n_qubits} qubits: {', '.join(trained)}"
+                    if trained else
+                    f"no training is bundled at {self.n_qubits} qubits yet")
+            return (f"missing weights '{path.name}' ({hint}) — switch track or "
+                    "qubit count, or train one in the Train tab")
         if self.n_qubits != 4:  # bundled mlp weights expect the 4-feature observation
             return f"bundled mlp weights use 4 features, config has {self.n_qubits}"
         path = WEIGHTS_DIR / f"mlp_{self.track_name}.npz"

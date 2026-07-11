@@ -101,7 +101,7 @@ const sections = ({ n_qubits: n = 4, n_layers: layers = 4, n_params: np = {} } =
   },
   {
     id: "docs",
-    title: "Documentation",
+    title: "Full documentation",
     html: '<div class="docs-root"></div>',
     mount: (body) => initDocs(body.querySelector(".docs-root")),
   },

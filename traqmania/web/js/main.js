@@ -85,10 +85,8 @@ function applyMode(mode) {
   attract.setMode(mode);
   renderer.setMode(mode);
   $("#evo-caption").hidden = mode !== "evolution";
-  if (mode !== "evolution") {
-    $("#evo-legend").hidden = true;
-    evoLegendKey = "";
-  }
+  $("#evo-legend").hidden = true; // refilled from the next state broadcast
+  evoLegendKey = "";
   renderEpisodeOverlay();
   if (mode === "train") selectTab("training");
   else if (mode === "hardware") selectTab("hardware");
@@ -231,14 +229,17 @@ function renderLapboard(cars) {
   board.innerHTML = rows.join("");
 }
 
-// -- evolution legend ----------------------------------------------------------
+// -- car legend ----------------------------------------------------------------
+// Corner legend for every labelled car (evolution stages, hero/pro driver
+// descriptions, ghosts): the description lives here, colors identify the
+// moving cars — no text is attached to the cars themselves.
 
 let evoLegendKey = "";
 
-function updateEvoLegend(cars) {
-  if (state.mode !== "evolution") return;
+function updateCarLegend(cars) {
   const labeled = cars.filter((c) => c.label);
-  const key = labeled.map((c) => `${c.label}${c.ghost ? "*" : ""}`).join("|");
+  const key = state.mode + "|" +
+    labeled.map((c) => `${c.label}${c.ghost ? "*" : ""}`).join("|");
   if (key === evoLegendKey) return;
   evoLegendKey = key;
   const el = $("#evo-legend");
@@ -248,8 +249,10 @@ function updateEvoLegend(cars) {
       if (c.ghost) {
         return `<div class="legend-row ghost"><span class="dot ghost-dot"></span>${c.label}</div>`;
       }
-      const color = renderer.stageColor(c.label);
-      return `<div class="legend-row"><span class="dot" style="background:${color}"></span>${c.label}</div>`;
+      const evo = state.mode === "evolution";
+      const color = evo ? renderer.stageColor(c.label) : KIND_COLORS[c.kind] || "#ccc";
+      const num = evo ? `<b style="color:${color}">${renderer.stageNumber(c.label)}</b> ` : "";
+      return `<div class="legend-row"><span class="dot" style="background:${color}"></span>${num}${c.label}</div>`;
     })
     .join("");
 }
@@ -326,7 +329,7 @@ net.on("state", (msg) => {
   state.lastState = msg;
   renderer.pushState(msg);
   renderLapboard(msg.cars || []);
-  updateEvoLegend(msg.cars || []);
+  updateCarLegend(msg.cars || []);
   if (msg.mode && msg.mode !== state.mode) applyMode(msg.mode); // server-driven mode change
 });
 
@@ -471,6 +474,38 @@ function updateTrainStats(msg) {
     </div>`,
   );
   $("#train-stats").innerHTML = rows.join("");
+}
+
+// -- sidebar resize ------------------------------------------------------------
+
+{
+  const resizer = $("#sidebar-resizer");
+  const setWidth = (px) => {
+    const w = Math.round(Math.min(Math.max(px, 300), window.innerWidth * 0.7));
+    document.documentElement.style.setProperty("--sidebar-w", `${w}px`);
+    return w;
+  };
+  const saved = Number(localStorage.getItem("traq-sidebar-w"));
+  if (saved) setWidth(saved);
+  resizer.addEventListener("pointerdown", (ev) => {
+    ev.preventDefault();
+    resizer.setPointerCapture(ev.pointerId);
+    resizer.classList.add("dragging");
+  });
+  resizer.addEventListener("pointermove", (ev) => {
+    if (!resizer.hasPointerCapture(ev.pointerId)) return;
+    setWidth(window.innerWidth - ev.clientX);
+  });
+  resizer.addEventListener("pointerup", (ev) => {
+    resizer.releasePointerCapture(ev.pointerId);
+    resizer.classList.remove("dragging");
+    const w = setWidth(window.innerWidth - ev.clientX);
+    localStorage.setItem("traq-sidebar-w", String(w));
+  });
+  resizer.addEventListener("dblclick", () => {
+    document.documentElement.style.removeProperty("--sidebar-w");
+    localStorage.removeItem("traq-sidebar-w");
+  });
 }
 
 // -- boot --------------------------------------------------------------------

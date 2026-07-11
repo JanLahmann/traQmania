@@ -25,14 +25,14 @@ export async function initDocs(root) {
     return;
   }
 
-  const picker = document.createElement("select");
-  picker.className = "doc-picker";
+  const picker = document.createElement("nav");
+  picker.className = "doc-nav";
   picker.setAttribute("aria-label", "Document");
   for (const doc of docList) {
-    const opt = document.createElement("option");
-    opt.value = doc.id;
-    opt.textContent = doc.title;
-    picker.append(opt);
+    const btn = document.createElement("button");
+    btn.dataset.docId = doc.id;
+    btn.textContent = doc.title;
+    picker.append(btn);
   }
   const content = document.createElement("article");
   content.className = "md";
@@ -46,11 +46,16 @@ export async function initDocs(root) {
     } catch {
       content.innerHTML = '<p class="doc-note">failed to load this document.</p>';
     }
-    if (picker.value !== id) picker.value = id;
+    for (const btn of picker.querySelectorAll("button")) {
+      btn.classList.toggle("active", btn.dataset.docId === id);
+    }
     content.scrollTop = 0;
   }
 
-  picker.addEventListener("change", () => show(picker.value));
+  picker.addEventListener("click", (ev) => {
+    const btn = ev.target.closest("button");
+    if (btn) show(btn.dataset.docId);
+  });
   content.addEventListener("click", (ev) => {
     const a = ev.target.closest("a");
     if (!a) return;
@@ -66,5 +71,5 @@ export async function initDocs(root) {
   });
 
   root.replaceChildren(picker, content);
-  show(docList[0].id); // server lists SCIENCE (the QML story) first
+  show(docList[0].id); // server lists the README (traQmania) first
 }

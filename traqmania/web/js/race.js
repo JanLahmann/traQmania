@@ -192,6 +192,13 @@ export class RaceRenderer {
     return this._stageColors.get(label);
   }
 
+  /** 1-based race number for an evolution stage label (same first-appearance
+   *  order as stageColor, so number and colour always agree with the legend). */
+  stageNumber(label) {
+    this.stageColor(label); // ensure the label is registered
+    return [...this._stageColors.keys()].indexOf(label) + 1;
+  }
+
   addEffect(kind, carId) {
     this.effects.push({ kind, carId, start: performance.now() });
   }
@@ -469,22 +476,24 @@ export class RaceRenderer {
     ctx.globalAlpha = 1;
   }
 
-  /** Car labels ("ep 250", ghost tags) in screen space above the car, plus a
-   *  small speed bar below it (fill = v / v_max; turns red under braking). */
+  /** Small speed bar below each car (fill = v / v_max; red under braking).
+   *  Car descriptions live in the corner legend, not on the moving car; in
+   *  evolution mode each car carries its race number in its stage colour. */
   _drawLabels(ctx, cars) {
     const { s, ox, oy } = this.transform;
     const dpr = window.devicePixelRatio || 1;
-    ctx.font = `600 ${11 * dpr}px system-ui, sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "bottom";
-    for (const car of cars) {
-      if (!car.label) continue;
-      const sx = s * car.x + ox;
-      const sy = -s * car.y + oy - s * 2.2;
-      ctx.fillStyle = car.ghost ? "rgba(230,233,239,0.45)" : "rgba(230,233,239,0.88)";
-      ctx.fillText(car.label, sx, sy);
+    if (this.mode === "evolution") {
+      ctx.font = `700 ${12 * dpr}px system-ui, sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "bottom";
+      for (const car of cars) {
+        if (!car.label || car.ghost) continue;
+        ctx.fillStyle = this.stageColor(car.label);
+        ctx.fillText(String(this.stageNumber(car.label)),
+                     s * car.x + ox, -s * car.y + oy - s * 1.6);
+      }
+      ctx.textBaseline = "alphabetic";
     }
-    ctx.textBaseline = "alphabetic";
     for (const car of cars) {
       if (car.ghost) continue;
       const braking = car.v > 2 && car.dvdt < -BRAKE_DECEL;

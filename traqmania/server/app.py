@@ -19,31 +19,25 @@ WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 REPO_ROOT = WEB_DIR.parent.parent  # only meaningful in a source checkout
 
 # Documentation surfaced in the web UI (Explain -> Full documentation), in
-# display order. These live at the repo root, not in the package, so the
-# feature quietly disappears on a bare pip install without the sources.
+# display order with explicit menu titles. These live at the repo root, not in
+# the package, so the feature quietly disappears on a bare pip install without
+# the sources. TM2020-CONCEPT.md stays in the repo but off the menu; links to
+# it from other docs open on GitHub.
 _DOC_SOURCES = (
-    ("SCIENCE", "docs/SCIENCE.md"),
-    ("README", "README.md"),
-    ("EXHIBITION", "docs/EXHIBITION.md"),
-    ("ARCHITECTURE", "docs/ARCHITECTURE.md"),
-    ("TM2020-CONCEPT", "docs/TM2020-CONCEPT.md"),
+    ("README", "README.md", "traQmania"),
+    ("EXHIBITION", "docs/EXHIBITION.md", "Exhibiting"),
+    ("SCIENCE", "docs/SCIENCE.md", "Science"),
+    ("ARCHITECTURE", "docs/ARCHITECTURE.md", "Architecture"),
 )
 
 
-def _doc_title(path: Path) -> str:
-    for line in path.read_text(encoding="utf-8").splitlines():
-        if line.startswith("# "):
-            return line[2:].strip()
-    return path.stem
-
-
 def discover_docs() -> dict[str, Path]:
-    """Doc id -> existing markdown path (empty outside a source checkout)."""
+    """Doc id -> (title, existing markdown path); empty outside a checkout."""
     found = {}
-    for doc_id, rel in _DOC_SOURCES:
+    for doc_id, rel, title in _DOC_SOURCES:
         path = REPO_ROOT / rel
         if path.is_file():
-            found[doc_id] = path
+            found[doc_id] = (title, path)
     return found
 
 
@@ -73,15 +67,16 @@ def create_app(config: dict[str, Any]) -> FastAPI:
     @app.get("/api/docs")
     def docs_index() -> dict[str, Any]:
         docs = discover_docs()
-        return {"docs": [{"id": doc_id, "title": _doc_title(path)}
-                         for doc_id, path in docs.items()]}
+        return {"docs": [{"id": doc_id, "title": title}
+                         for doc_id, (title, _path) in docs.items()]}
 
     @app.get("/api/docs/{doc_id}")
     def doc_content(doc_id: str) -> dict[str, str]:
-        path = discover_docs().get(doc_id)
-        if path is None:
+        entry = discover_docs().get(doc_id)
+        if entry is None:
             raise HTTPException(status_code=404, detail=f"unknown doc '{doc_id}'")
-        return {"id": doc_id, "title": _doc_title(path),
+        title, path = entry
+        return {"id": doc_id, "title": title,
                 "markdown": path.read_text(encoding="utf-8")}
 
     docs_assets = REPO_ROOT / "docs"
