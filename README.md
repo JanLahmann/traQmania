@@ -53,6 +53,7 @@ images with Qiskit preinstalled):
 | oval | ~11 s training (ep ≈ 300) | 14.4 s | 13.9–15.2 s |
 | chicane | ~11 s training (ep ≈ 294) | 14.1 s | 14.7–15.8 s |
 | gp | ~47 s training (ep ≈ 686) | 20.4 s | 19.8–20.4 s |
+| combo | ~65 s training (ep ≈ 1016) | 26.8 s (2/3 seeds lap) | 26.6 s |
 
 Warm-start live demo: from the bundled pre-first-lap checkpoint, the quantum agent
 gets its first clean lap in **1.4–2.8 s** of training (oval, 3/3 seeds).
@@ -87,10 +88,11 @@ quantum lap time, so this stays parity, not advantage.
 tracks round-robin (2500 episodes, seed 42) yields a bundled **universal**
 driver that laps oval (14.3 s), chicane (14.8 s), gp (25.7 s — the gp
 specialist does 20.4 s) *and* 10/10 unseen generated tracks at medium
-difficulty (best 12.5 s). Specialists stay faster at home; the egocentric
-lidar-and-speed observation is what makes the transfer work. Seed-honesty:
-2 of 3 seeds failed to generalize to gp — the bundled weights are the seed
-that did.
+difficulty (best 12.5 s). It even laps the **combo** track (chicane + gp-style
+hairpin, added after it was trained) zero-shot at 33.9 s. Specialists stay
+faster at home; the egocentric lidar-and-speed observation is what makes the
+transfer work. Seed-honesty: 2 of 3 seeds failed to generalize to gp — the
+bundled weights are the seed that did.
 
 Why we train on a simulator and run inference on hardware: one double-DQN update is
 **~3.4 ms** with the numpy statevector + adjoint path vs **~20.5 s** with
