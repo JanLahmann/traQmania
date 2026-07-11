@@ -129,19 +129,28 @@ function applyTrack(payload) {
   }
 }
 
+// Expert mode (open the page with #expert) reveals the hidden hero driver:
+// a model-based racing-line controller, the demo's "perfect drive" ceiling.
+const EXPERT = window.location.hash.includes("expert");
+
 /** Populate the Watch-mode driver picker from welcome.drivers/driver. */
 function applyDrivers(drivers, current) {
   const sel = $("#driver-select");
-  const label = (d) => (d === "auto" ? "auto (this track)" : `${d}-trained`);
+  const label = (d) =>
+    d === "auto" ? "auto (this track)"
+    : d === "hero" ? "hero — racing line"
+    : `${d}-trained`;
   sel.replaceChildren(
-    ...(drivers || ["auto"]).map((d) => {
-      const opt = document.createElement("option");
-      opt.value = d;
-      opt.textContent = label(d);
-      return opt;
-    }),
+    ...(drivers || ["auto"])
+      .filter((d) => EXPERT || d !== "hero")
+      .map((d) => {
+        const opt = document.createElement("option");
+        opt.value = d;
+        opt.textContent = label(d);
+        return opt;
+      }),
   );
-  sel.value = current || "auto";
+  sel.value = (current !== "hero" || EXPERT) && current ? current : "auto";
 }
 
 /** Ask for a generated track: typed seed (empty -> fresh roll) + length. */

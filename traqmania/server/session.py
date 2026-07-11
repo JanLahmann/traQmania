@@ -114,6 +114,7 @@ class _Car:
     rays: list | None = None
     respawn_at: float | None = None  # sim time to respawn a frozen (crashed) human
     label: str | None = None  # shown next to the car (e.g. "ep 250" in evolution mode)
+    controller: Any = None  # continuous-control policy (the hero racing-line driver)
     traj: list = field(default_factory=list)  # (x, y, theta) at decision rate, this lap
     traj_full: bool = True  # False once the trajectory overflowed and was dropped
 
@@ -284,11 +285,13 @@ class DemoSession:
 
     def available_drivers(self) -> list[str]:
         """Driver choices for SetDriver: "auto" plus every training whose
-        quantum weights are bundled at the active qubit count."""
+        quantum weights are bundled at the active qubit count, plus "hero"
+        (the model-based racing-line controller — no weights, any track;
+        the UI only offers it in expert mode)."""
         return ["auto"] + [
             name for name in ("oval", "chicane", "gp", "universal")
             if quantum_weights_path(name, self.n_qubits).is_file()
-        ]
+        ] + ["hero"]
 
     def _obs_labels(self) -> list[str]:
         """Display names of the observation features feeding the circuit,
@@ -352,8 +355,10 @@ class DemoSession:
     # -------------------------------------------------------- weight resolution
 
     def _quantum_weights_path(self, suffix: str = "") -> Path:
-        if suffix == "" and self.driver != "auto":
+        if suffix == "" and self.driver not in ("auto", "hero"):
             # explicit driver pick: that training's weights, whatever the track
+            # ("hero" has no weights — quantum cars fall through to the track
+            # specialist while the hero pick only affects the attract car)
             return quantum_weights_path(self.driver, self.n_qubits)
         if self.track_is_random:  # no per-track specialist exists: fall back
             return random_track_weights(self.n_qubits, suffix)[0]
@@ -386,10 +391,13 @@ class DemoSession:
             if (path := self._quantum_weights_path(f"_stage{i}")).is_file()
         ]
         if specs:
+            best = quantum_weights_path(self.track_name, self.n_qubits)
+            if best.is_file():
+                specs[-1] = ("best", best)  # end on the shipped driver
             return specs
         pair = [("warm-start", self._quantum_weights_path("_warmstart")),
-                ("trained", self._quantum_weights_path())]
-        return pair * 2 if all(path.is_file() for _, path in pair) else []
+                ("best", quantum_weights_path(self.track_name, self.n_qubits))]
+        return pair if all(path.is_file() for _, path in pair) else []
 
     def _weights_unavailable(self, mode: str, opponent: str = "quantum") -> str | None:
         """Why bundled weights block switching to ``mode`` (None when they don't).
@@ -398,6 +406,8 @@ class DemoSession:
         if mode == "hardware" and self.track_is_random:
             # the hardware runner loads tracks by bundled name (Track.load)
             return "hardware execution needs a bundled track"
+        if mode == "attract" and self.driver == "hero":
+            return None  # model-based controller: works on any track, no weights
         if mode in ("attract", "hardware"):
             return self._agent_unavailable("quantum")
         if mode == "race":
@@ -545,8 +555,28 @@ class DemoSession:
         self._outbox.append(self.welcome_payload())
 
     def _enter_attract(self) -> None:
+        if self.driver == "hero":
+            self.cars = [self._make_hero_car()]
+            return
         car = self._try_make_agent_car("quantum")
         self.cars = [car] if car is not None else []
+
+    def _make_hero_car(self) -> _Car:
+        """The expert-demo reference car: continuous-control racing-line
+        tracking computed from the track geometry — honestly labelled as
+        model-based, not learned."""
+        from traqmania.env.racing_line import RacingLineController
+
+        key = ("hero", self.track_name, "")
+        if key not in self._agent_cache:
+            self._agent_cache[key] = RacingLineController(
+                self.track, self.config["physics"])
+        x, y, theta = self.track.start_pose()
+        car = _Car(id="hero", kind="hero", state=np.array([x, y, theta, 0.0]),
+                   controller=self._agent_cache[key],
+                   label="driver: racing line (model-based, not learned)")
+        self._respawn(car)
+        return car
 
     def _enter_race(self, opponent: str) -> None:
         x, y, theta = self.track.start_pose()
@@ -957,6 +987,9 @@ class DemoSession:
             if car.respawn_at is not None:
                 continue
             self._record_traj(car)
+            if car.controller is not None:
+                car.controls = car.controller(car.state)
+                continue
             if car.qfunc is None:
                 continue
             obs = self._car_obs(car)
@@ -1052,6 +1085,18 @@ class DemoSession:
             return
         car.traj.append((float(car.state[0]), float(car.state[1]), float(car.state[2])))
 
+    def _driver_description(self, car: _Car) -> str:
+        """Honest one-liner of what drove a lap (stored in ghost records)."""
+        if car.kind == "human":
+            return "human"
+        if car.kind == "hero":
+            return "racing line (model-based)"
+        if car.label and car.label.startswith("driver: "):
+            return car.label[len("driver: "):]
+        if car.kind == "quantum":
+            return f"{self.track_name}-trained"
+        return f"{car.kind} ({self.track_name}-trained)"
+
     def _maybe_record_ghost(self, car: _Car, lap_time: float) -> None:
         """Persist a clean lap as the track's best-lap ghost when it beats the record."""
         if self.track_is_random:  # ephemeral tracks: never write ghosts_dir/random*.json
@@ -1064,6 +1109,7 @@ class DemoSession:
         ghost = {
             "lap_time": float(lap_time),
             "kind": car.kind,
+            "driver": self._driver_description(car),
             "points": [list(p) for p in car.traj] + [[x, y, theta]],
         }
         save_ghost(self.track_name, ghost, self._ghosts_dir)
@@ -1093,7 +1139,8 @@ class DemoSession:
             "last_lap_time": ghost["lap_time"],
             "off_track": False,
             "ghost": True,
-            "label": f"best {ghost['lap_time']:.1f}s",
+            "label": f"best {ghost['lap_time']:.1f}s"
+            + (f" · {ghost['driver']}" if ghost.get("driver") else ""),
         }
 
     # ------------------------------------------------------------ broadcasting

@@ -20,9 +20,13 @@ GHOSTS_DIR = Path(__file__).resolve().parent.parent / "data" / "ghosts"
 N_EVOLUTION_STAGES = 4
 
 
+TRACK_ORDER = ("oval", "chicane", "gp", "combo")  # simple -> complex, UI order
+
+
 def available_tracks() -> list[str]:
-    """Bundled track names, sorted (e.g. ['chicane', 'gp', 'oval'])."""
-    return sorted(p.stem for p in TRACKS_DIR.glob("*.json"))
+    """Bundled track names, simple-to-complex (unknown extras sorted last)."""
+    found = {p.stem for p in TRACKS_DIR.glob("*.json")}
+    return [n for n in TRACK_ORDER if n in found] + sorted(found - set(TRACK_ORDER))
 
 
 def load_track(config: dict, name: str) -> Track:
@@ -78,11 +82,20 @@ def evolution_stage_specs(track_name: str) -> list[tuple[str, Path]]:
         if (path := WEIGHTS_DIR / f"quantum_{track_name}_stage{i}.npz").is_file()
     ]
     if specs:
+        best = WEIGHTS_DIR / f"quantum_{track_name}.npz"
+        if best.is_file():
+            # the last car runs the shipped best-snapshot driver rather than
+            # the last training snapshot (final-episode params drift)
+            specs[-1] = ("best", best)
         return specs
     warm = WEIGHTS_DIR / f"quantum_{track_name}_warmstart.npz"
     final = WEIGHTS_DIR / f"quantum_{track_name}.npz"
-    pair = [(_weights_label(warm, "warm-start"), warm), (_weights_label(final, "trained"), final)]
-    return pair * 2
+
+    def pair_label(kind: str, path: Path) -> str:
+        ep = _weights_label(path, "")
+        return f"{kind} ({ep})" if ep else kind
+
+    return [(pair_label("warm-start", warm), warm), (pair_label("best", final), final)]
 
 
 def ghost_path(track_name: str, ghosts_dir: Path | None = None) -> Path:
@@ -105,6 +118,7 @@ def load_ghost(track_name: str, ghosts_dir: Path | None = None) -> dict | None:
         return {
             "lap_time": lap_time,
             "kind": str(ghost.get("kind", "quantum")),
+            "driver": str(ghost["driver"]) if ghost.get("driver") else None,
             "points": [[float(p[0]), float(p[1]), float(p[2])] for p in points],
         }
     except (OSError, ValueError, KeyError, TypeError, IndexError):

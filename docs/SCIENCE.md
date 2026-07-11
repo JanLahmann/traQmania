@@ -226,6 +226,25 @@ failed to generalize to gp (0/6); training purely on pools of generated
 tracks (`--track random`) was strictly worse on the bundled tracks. All
 learning curves are in `data/histories/` (`multi_*`, `random_*`).
 
+### The ceiling: a model-based reference driver
+
+To know how good the learned drivers actually are, the expert demo includes a
+**hero** driver that is not learned at all: it computes a
+curvature-minimizing racing line and a brake/accelerate-feasible speed
+profile directly from the track geometry and the `[physics]` constants, and
+tracks it with *continuous* steering (pure pursuit). Measured: oval 14.0 s,
+chicane 14.0 s, gp 19.8 s — better than every learned agent, but not by
+much on the simple tracks. Two useful facts follow. First, the RL agents'
+gap to the ceiling is mostly their action set: they steer with 4 bang-bang
+actions at 10 Hz, the hero steers continuously. Second, capacity is not the
+constraint — an MLP with 8× the parameters (hidden width 64, 580 params)
+trained on the same recipe laps the oval in 14.2 s, no better than the
+76-parameter one. On this arcade physics, tiny function approximators are
+already near-optimal on simple tracks; gp (19.8 vs 20.4 s) is where control
+quality still pays. And the controller is a reference, not an oracle: on the
+combo track's inward hairpins the trained quantum specialist beats it
+(21.7 vs 22.6 s).
+
 ## Honest claims
 
 Being honest matters more than being exciting:

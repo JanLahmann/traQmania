@@ -5,6 +5,7 @@ export const KIND_COLORS = {
   quantum: "#7a5cff",
   mlp: "#2fbf71",
   human: "#ff9f1c",
+  hero: "#22d3ee", // expert-menu racing-line controller
 };
 
 // Evolution mode: one colour per training stage (cool -> hot as training
@@ -486,15 +487,26 @@ export class RaceRenderer {
     for (const car of cars) {
       if (car.ghost) continue;
       const braking = car.v > 2 && car.dvdt < -BRAKE_DECEL;
-      const w = 30 * dpr;
-      const h = 3.5 * dpr;
+      const w = 34 * dpr;
+      const h = 5 * dpr;
+      const r = h / 2;
       const sx = s * car.x + ox - w / 2;
       const sy = -s * car.y + oy + s * 1.9;
       const frac = Math.min(Math.max(car.v / V_MAX, 0), 1);
-      ctx.fillStyle = "rgba(16,18,24,0.6)";
-      ctx.fillRect(sx, sy, w, h);
-      ctx.fillStyle = braking ? "#e5484d" : this._carColor(car);
-      ctx.fillRect(sx, sy, w * frac, h);
+      // speedometer gauge: bordered rounded track + fill (red = braking)
+      ctx.beginPath();
+      ctx.roundRect(sx, sy, w, h, r);
+      ctx.fillStyle = "rgba(16,18,24,0.75)";
+      ctx.fill();
+      ctx.strokeStyle = "rgba(230,233,239,0.5)";
+      ctx.lineWidth = dpr;
+      ctx.stroke();
+      if (frac > 0.02) {
+        ctx.beginPath();
+        ctx.roundRect(sx + dpr, sy + dpr, (w - 2 * dpr) * frac, h - 2 * dpr, r);
+        ctx.fillStyle = braking ? "#e5484d" : this._carColor(car);
+        ctx.fill();
+      }
     }
   }
 

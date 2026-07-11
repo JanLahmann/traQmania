@@ -53,7 +53,8 @@ flowchart LR
 | `traqmania/env/track.py` | Closed-loop track geometry: resampling, arc-length projection, lidar raycasts, spatial-hash acceleration, validation. |
 | `traqmania/env/car.py` | Vectorized bicycle-ish car physics (throttle/brake/drag, speed-dependent steering). |
 | `traqmania/env/racing_env.py` | Gym-style vector env: obs = lidar rays (`[observation] ray_angles_deg`, 3 by default) + speed, progress reward, checkpoint/lap bonuses, off-track penalty, auto-reset. |
-| `traqmania/env/trackgen.py` | Procedural track generator (numpy-only): `generate_track(seed, difficulty)` builds a deterministic closed loop that passes the exact `Track.load` validation (see "Random tracks" below). |
+| `traqmania/env/trackgen.py` | Procedural track generator (numpy-only): `generate_track(seed, difficulty, length)` builds a deterministic closed loop that passes the exact `Track.load` validation (see "Random tracks" below); `LENGTH_PRESETS` maps short/medium/long to base-radius ranges and perimeter caps. |
+| `traqmania/env/racing_line.py` | The model-based "hero" driver (expert demo): curvature-minimizing racing line, brake/accel-feasible speed profile from `[physics]`, pure-pursuit `RacingLineController` returning continuous (steer, throttle, brake). Not a learned agent. |
 | `traqmania/env/multi_track.py` | `MultiTrackEnv`: round-robin mixture of per-track `RacingEnv`s behind the identical vector-env interface, so `DQNTrainer` trains one policy over several tracks unchanged; `random_pool` builds the mixture from generated tracks. |
 | `traqmania/agents/base.py` | `QFunction` protocol + the 4 discrete actions (right/straight/left at full throttle, coast-brake — car steer +1 turns left on screen). |
 | `traqmania/agents/quantum/circuit.py` | Canonical Qiskit circuit (single source of truth) + JSON `circuit_spec` for the browser diagram. |
@@ -68,7 +69,7 @@ flowchart LR
 | `traqmania/server/session.py` | `DemoSession`: the mode state machine and synchronous 60 Hz `tick()`; training threads; ghost recording. |
 | `traqmania/server/runtime.py` | Loading bundled agents/weights/tracks/ghosts, track payloads, training-config resolution. |
 | `traqmania/server/ws.py` | Connection `Hub`, broadcast fan-out, per-socket receive loop. |
-| `traqmania/server/app.py` | FastAPI factory: `/health`, `/ws`, static frontend mounted last. |
+| `traqmania/server/app.py` | FastAPI factory: `/health`, `/ws`, `/api/docs` + `/api/docs/{id}` (repo markdown for the in-UI docs browser; empty outside a source checkout) and `/docs-assets` (images), static frontend mounted last. |
 | `traqmania/train_headless.py` | Offline training CLI that produces the bundled `weights/*.npz` (+ `.meta.json`, history JSON). Besides the bundled names, `--track multi` trains one policy on the oval+chicane+gp mixture and `--track random` on a `MultiTrackEnv.random_pool` of generated tracks (seeded from `--seed`); weights save under the literal names (`quantum_multi.npz` / `quantum_random.npz`) — the universal-driver candidates. |
 | `traqmania/bench.py` | Micro-benchmarks (env steps, forward passes, DQN updates). |
 | `tools/make_stages.py` | Trains a fresh quantum agent, snapshots parameters as it learns, and saves 4 evolution-stage weights `quantum_<track>_stage{1..4}.npz` (+ `.meta.json` with the episode count shown as the car label). |
@@ -168,12 +169,28 @@ alongside). The analog override persists until a later keys-only `input`.
 **`set_mode`** — `{mode}` with `mode` ∈ `attract | train | race | evolution |
 hardware`.
 
-**`set_track`** — `{track, seed?}` with `track` a name from `welcome.tracks`
-or the special name `"random"` (procedurally generated — see "Random
-tracks"). `seed` (int ≥ 0, *omitted-if-null*) is only meaningful with
+**`set_track`** — `{track, seed?, length?}` with `track` a name from
+`welcome.tracks` or the special name `"random"` (procedurally generated — see
+"Random tracks"). `seed` (int ≥ 0, *omitted-if-null*) is only meaningful with
 `track: "random"` and makes the generated track reproducible; without it the
-server rolls a fresh one. Rejected with an `error` while training or a
-hardware job is running, or for unknown names.
+server rolls a fresh one. `length` (`"short" | "medium" | "long"`,
+*omitted-if-null*, default medium) picks a size preset; non-default lengths
+are tagged into the track name (`random #7 (long)`), and long tracks are for
+live driving only (laps can exceed the 60 s training-episode cap). Rejected
+with an `error` while training or a hardware job is running, or for unknown
+names.
+
+**`set_driver`** — `{driver}`: pick which trained quantum weights drive the
+agent car. `"auto"` (default) uses the current track's specialist with the
+honest universal/gp fallback on generated tracks; a training name from
+`welcome.drivers` (e.g. `"oval"`, `"gp"`, `"universal"`) forces that
+training's weights on any track; `"hero"` swaps in the model-based
+racing-line controller (expert demo — no weights, continuous controls, works
+on every track; the stock UI only offers it with `#expert` in the URL). The
+attract car rebuilds immediately; race/evolution are unaffected (`"hero"`
+behaves like `"auto"` for them). Unavailable names (not bundled at the active
+qubit count) get an `error`; a qubit switch silently resets an unavailable
+pick to `"auto"`.
 
 **`train`**
 
@@ -216,8 +233,11 @@ noise-model twin).
 ### Server → client
 
 **`welcome`** — sent on connect and in reply to `hello` (and re-broadcast to
-everyone after a `qubits` switch):
-`{mode, track: TrackPayload, tracks: [str], circuit_spec, ui, obs_labels}`.
+everyone after a `qubits` or `set_driver` switch):
+`{mode, track: TrackPayload, tracks: [str], circuit_spec, ui, obs_labels,
+driver, drivers}`. `driver` is the active `set_driver` selection (`"auto"`
+default) and `drivers` the currently valid choices (`"auto"`, each bundled
+training at the active qubit count, and `"hero"`).
 `circuit_spec` is the JSON gate-by-gate circuit description from
 `agents/quantum/circuit.circuit_spec` (qubit/layer/gate list, parameter
 counts, readout observables). `ui` is the `[ui]` config section

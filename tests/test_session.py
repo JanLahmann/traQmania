@@ -191,21 +191,18 @@ def test_evolution_stage_specs_oval_and_fallback():
     specs = evolution_stage_specs("oval")  # bundled stage snapshots
     assert len(specs) == 4
     labels = [label for label, _ in specs]
-    assert all(re.fullmatch(r"ep \d+", label) for label in labels)
-    episodes = [int(label.split()[1]) for label in labels]
-    assert episodes == sorted(episodes) and len(set(episodes)) == 4
+    # early stages carry their episode label; the finale is the shipped driver
+    assert all(re.fullmatch(r"ep \d+", label) for label in labels[:-1])
+    assert labels[-1] == "best"
+    assert specs[-1][1].name == "quantum_oval.npz"
+    episodes = [int(label.split()[1]) for label in labels[:-1]]
+    assert episodes == sorted(episodes) and len(set(episodes)) == 3
     assert all(path.is_file() for _, path in specs)
-    # stages are eval-selected: meta carries strictly improving (laps, -best_lap)
-    scores = []
-    for _, path in specs:
-        meta = json.loads(path.with_suffix("").with_suffix(".meta.json").read_text())
-        lap = meta["eval_best_lap"]
-        scores.append((meta["eval_laps"], -lap if lap is not None else -float("inf")))
-    assert scores == sorted(scores) and len(set(scores)) == 4
-    # chicane has no stage files -> [warmstart, final] duplicated to 4 cars
+    # chicane has no stage files -> [warm-start, best], no duplicated cars
     fallback = evolution_stage_specs("chicane")
-    assert len(fallback) == 4
-    assert fallback[0] == fallback[2] and fallback[1] == fallback[3]
+    assert len(fallback) == 2
+    assert fallback[0][0].startswith("warm-start")
+    assert fallback[1][0].startswith("best")
     assert all(path.is_file() for _, path in fallback)
 
 
@@ -242,10 +239,15 @@ def make_fake_ghost(track, n_points: int = 40) -> dict:
 
 def test_ghost_save_load_round_trip(tmp_path):
     assert load_ghost("oval", tmp_path) is None
-    ghost = {"lap_time": 21.5, "kind": "mlp", "points": [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]}
+    ghost = {"lap_time": 21.5, "kind": "mlp", "driver": "mlp (oval-trained)",
+             "points": [[0.0, 1.0, 2.0], [3.0, 4.0, 5.0]]}
     path = save_ghost("oval", ghost, tmp_path)
     assert path == tmp_path / "oval.json"
     assert load_ghost("oval", tmp_path) == ghost
+    # records from before driver provenance load with driver=None
+    (tmp_path / "chicane.json").write_text(json.dumps(
+        {"lap_time": 3.0, "kind": "human", "points": [[0, 0, 0], [1, 1, 1]]}))
+    assert load_ghost("chicane", tmp_path)["driver"] is None
     # invalid records are rejected
     (tmp_path / "gp.json").write_text(json.dumps({"lap_time": 5.0, "points": []}))
     assert load_ghost("gp", tmp_path) is None

@@ -24,28 +24,38 @@ OUT = Path(__file__).resolve().parent.parent / "traqmania" / "env" / "tracks" / 
 
 # (kind, *args): ("s", length) straight, ("a", radius, degrees) arc where
 # positive degrees turn left (CCW) and negative turn right. "BOTTOM"/"LEFT"
-# are the closure straights solved below.
+# are the closure straights solved below. Both hairpin fingers point INTO
+# the loop, and gentle S-sweeps break up what would be long straights.
 LAYOUT = [
-    ("s", "BOTTOM"),        # bottom straight, heading +x (start line lives here)
-    ("a", 20.0, 90.0),      # bottom-right corner
-    ("s", 12.0),            # right side, heading +y
-    ("a", 12.0, -90.0),     # into the finger (heading +x)
-    ("s", 26.0),            # finger out
-    ("a", 9.5, 180.0),      # THE hard gp turn: tight 180 cap
-    ("s", 26.0),            # finger back
-    ("a", 12.0, -90.0),     # out of the finger (heading +y again)
-    ("s", 12.0),            # right side continues
-    ("a", 20.0, 90.0),      # top-right corner (heading -x)
-    ("s", 30.0),            # top straight, first part
+    ("s", "BOTTOM"),        # bottom leg, heading +x (start line lives here)
+    ("a", 30.0, 28.0),      # sweeping S instead of a long straight...
+    ("a", 30.0, -28.0),
+    ("s", 10.0),
+    ("a", 18.0, 90.0),      # bottom-right corner
+    ("s", 6.0),             # right leg, heading +y
+    ("a", 12.0, 90.0),      # into the right finger, pointing INWARD (-x)
+    ("s", 20.0),
+    ("a", 9.5, -180.0),     # hard gp turn #1: tight 180 cap inside the loop
+    ("s", 20.0),
+    ("a", 12.0, 90.0),      # out of the finger (heading +y again)
+    ("s", 6.0),
+    ("a", 18.0, 90.0),      # top-right corner (heading -x)
+    ("s", 8.0),
     ("a", 14.0, 45.0),      # chicane: flick out...
     ("a", 14.0, -45.0),
-    ("s", 14.0),            # ...short middle...
+    ("s", 12.0),            # ...short middle...
     ("a", 14.0, -45.0),     # ...flick back
     ("a", 14.0, 45.0),
-    ("s", 30.0),            # top straight, second part
-    ("a", 20.0, 90.0),      # top-left corner (heading -y)
-    ("s", "LEFT"),          # left side down
-    ("a", 20.0, 90.0),      # bottom-left corner, closing onto the start
+    ("s", 8.0),
+    ("a", 18.0, 90.0),      # top-left corner (heading -y)
+    ("s", "LEFT"),          # left leg down
+    ("a", 12.0, 90.0),      # into the left finger, pointing INWARD (+x)
+    ("s", 16.0),
+    ("a", 9.5, -180.0),     # hard gp turn #2, also inside the loop
+    ("s", 16.0),
+    ("a", 12.0, 90.0),      # out of the finger (heading -y again)
+    ("s", 6.0),
+    ("a", 18.0, 90.0),      # bottom-left corner, closing onto the start
 ]
 
 
@@ -89,7 +99,7 @@ def main() -> None:
     # solve the two closure straights: residual with zero-length placeholders
     resid = trace(0.0, 0.0)[-1]  # loop end - start(0,0)
     bottom, left = -resid[0], resid[1]  # bottom adds +x, left adds -y
-    assert bottom > 20 and left > 20, (bottom, left)
+    assert bottom > 5 and left > 5, (bottom, left)  # short is good: no long straights
     pts = trace(bottom, left)[:-1]  # drop the duplicated closing point
     track = Track("combo", pts, HALF_WIDTH, (0.0, 0.25, 0.5, 0.75), 1.5)  # validates
     print(f"combo: length {track.total_length:.1f}, "

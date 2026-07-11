@@ -137,13 +137,23 @@ A narrative that works cold, in order. Controls for the race segment:
   4 are provably dead (a fun aside for physicists: the final RZ commutes with
   the Z measurement). Gauges are live ⟨Z_a⟩; bars are Q-values after the
   trained output head. The circuit diagram is the actual gate sequence.
+  The **Driver** dropdown swaps which training drives — put the gp-trained
+  specialist on the oval to show zero-shot transfer, or pick *universal* (one
+  circuit trained on all three tracks at once).
+- **Surprise tracks (🎲 random):** every roll is a fresh procedurally
+  generated circuit with hairpins and chicanes; the universal weights drive
+  it. Type a seed (shown in the track label) to reload a favourite; the size
+  dropdown gives short/medium/long layouts. Long tracks are for driving and
+  watching, not training.
 - **Train:** double DQN, epsilon-greedy, replay buffer — the classical RL
   recipe, with the neural network swapped for a quantum circuit. Choosing
   *Both* races quantum vs MLP learning curves live. Honest line: *"similar
   learning, no speedup — the interesting part is that a 56-parameter quantum
   model does this at all."*
-- **Evolution:** all four cars run the identical architecture; only the
-  training episode count differs. Labels show "ep N".
+- **Evolution:** all cars run the identical architecture; only the training
+  amount differs. Labels show "ep N" for mid-training checkpoints and "best"
+  for the shipped driver. Tracks without stage snapshots show just two cars:
+  warm-start vs best.
 - **Race:** the agent decides 10 times per second and gets exactly the same
   observation a human gets from the screen: three distance rays and speed.
   Clean laps that beat the record become the new ghost.
@@ -151,6 +161,23 @@ A narrative that works cold, in order. Controls for the race segment:
   step is ~3.4 ms simulated vs ~20.5 s with circuit-evaluation gradients
   (before queue time!). The *sprint* action shows the middle path: SPSA
   fine-tuning at 2 quantum jobs per iteration, whatever the parameter count.
+
+## Expert mode: the hero driver
+
+Open the demo with `#expert` in the URL (`http://127.0.0.1:8000/#expert`) and
+the Watch-mode Driver dropdown gains **hero — racing line**: a cyan car driven
+by a model-based controller, *not* a learned agent. It computes the
+curvature-minimizing racing line and a physics-derived braking/speed profile
+straight from the track geometry and tracks it with continuous steering — the
+"perfect drive" ceiling for this car model. Measured: oval 14.0 s, chicane
+14.0 s, gp 19.8 s, combo 22.6 s, and it handles every generated track. Two talking points:
+the RL agents are surprisingly close to this ceiling on the simple tracks
+(their gap is mostly the 4-action bang-bang control, not intelligence — an
+8×-bigger trained MLP gets *no* faster), and the hero's line visibly differs
+(apex-cutting, earlier braking). It is near-optimal, not provably optimal: on
+combo the trained quantum specialist actually beats it (21.7 vs 22.6 s). Its clean laps become ghosts labelled
+"racing line (model-based)"; delete `traqmania/data/ghosts/<track>.json` (or
+your `--ghosts-dir` equivalent) to reset a track's record before a show.
 
 ## Hardware-mode prerequisites
 
