@@ -10,6 +10,7 @@ import { AttractManager } from "./attract.js";
 import { initDraw } from "./draw.js";
 import { initExplain } from "./explain.js";
 import { initHardwarePanel } from "./hardware-panel.js";
+import { initTooltips } from "./tooltip.js";
 
 const $ = (sel) => document.querySelector(sel);
 
@@ -189,8 +190,8 @@ function applyCircuitSize(spec) {
     hint.innerHTML =
       n === 4
         ? "Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the 4 qubits — one per action."
-        : `Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the first 4 of ${n} qubits` +
-          " — one per action.";
+        : `Pauli-Z expectation values &lt;Z<sub>i</sub>&gt; of all ${n} qubits — ` +
+          "the highlighted first four are the action readout.";
   }
   initExplain($("#panel-explain"), spec);
 }
@@ -582,6 +583,7 @@ initDraw({
 
 // -- boot --------------------------------------------------------------------
 
+initTooltips();
 setStatus("connecting…", "pill-off");
 applyMode("attract");
 net.connect();

@@ -321,6 +321,28 @@ input[type="number"],
   font-style: italic;
 }
 
+/* -- delayed hover tooltips ---------------------------------------------------- */
+
+.ui-tip {
+  position: fixed;
+  z-index: 40;
+  max-width: 280px;
+  background: var(--bg-panel);
+  border: 1px solid var(--quantum);
+  border-radius: 8px;
+  padding: 8px 12px;
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text);
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.5);
+  pointer-events: none;
+}
+
+.qgauge-readout .qgauge-label {
+  color: var(--quantum); /* the first four qubits feed the output head */
+  font-weight: 600;
+}
+
 /* -- leaderboard panel --------------------------------------------------------- */
 
 #race-controls #race-name {

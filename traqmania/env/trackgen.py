@@ -122,19 +122,24 @@ def _sample_shape(
     # localized corner features: mostly dents (hairpins), some bumps; these
     # are deep on purpose — they, not the loop's global curvature, must be
     # the tight corners, or the track degenerates into a rounded blob
-    n_feat = int(rng.integers(3, 6 + int(round(3.0 * difficulty))))
+    n_feat = int(rng.integers(4, 7 + int(round(3.0 * difficulty))))
     centers = rng.uniform(0.0, 2.0 * np.pi, size=n_feat)
     widths = rng.uniform(0.15 + 0.1 * (1.0 - difficulty), 0.5, size=n_feat)
     depths = rng.uniform(0.10, 0.25 + 0.20 * difficulty, size=n_feat)
     signs = np.where(rng.random(n_feat) < 0.6, -1.0, 1.0)
-    # guaranteed hairpin: the first feature is always a narrow deep dent...
-    widths[0] = rng.uniform(0.14, 0.22)
-    depths[0] = rng.uniform(0.22, 0.30) + 0.15 * difficulty
-    signs[0] = -1.0
-    # ...and half the time a bump right beside it turns it into an S-chicane
-    if n_feat > 1 and rng.random() < 0.5:
-        centers[1] = centers[0] + 1.6 * (widths[0] + widths[1]) * (1 if rng.random() < 0.5 else -1)
-        signs[1] = 1.0
+    # TWO guaranteed hairpins on opposite-ish sides of the lap (one hairpin
+    # on an otherwise-gentle loop reads as boring, especially under the v2
+    # physics where mild corners are taken flat-out)...
+    for k in (0, 1):
+        widths[k] = rng.uniform(0.14, 0.22)
+        depths[k] = rng.uniform(0.22, 0.30) + 0.15 * difficulty
+        signs[k] = -1.0
+    centers[1] = centers[0] + np.pi + rng.uniform(-0.6, 0.6)
+    # ...and a bump right beside the first ALWAYS turns it into an S-chicane
+    if n_feat > 2:
+        centers[2] = centers[0] + 1.6 * (widths[0] + widths[2]) * (1 if rng.random() < 0.5 else -1)
+        signs[2] = 1.0
+        depths[2] = max(depths[2], 0.15)
     d_theta = np.angle(np.exp(1j * (theta[None, :] - centers[:, None])))  # wrapped
     feat = (
         signs[:, None] * depths[:, None]

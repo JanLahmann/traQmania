@@ -103,8 +103,9 @@ def test_switch_4_to_6_rebuilds_and_drives(tmp_path):
     rays = next(c["rays"] for m in reversed(states) for c in m["cars"] if "rays" in c)
     assert len(rays) == 5  # 6-feature obs: 5 rays + speed
     quantum = by_type(msgs, "quantum")
-    assert quantum  # readout stays pinned to 4 actions
-    assert all(len(q["expectations"]) == len(q["q_values"]) == 4 for q in quantum)
+    assert quantum  # gauges show all 6 qubits; actions stay pinned to 4
+    assert all(len(q["expectations"]) == 6 for q in quantum)
+    assert all(len(q["q_values"]) == 4 for q in quantum)
 
 
 def test_switch_back_to_4_is_bit_identical_default(tmp_path):

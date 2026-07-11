@@ -129,8 +129,8 @@ def test_session_q6_bundled_weights_attract_drives(tmp_path):
     assert quantum
     for q in quantum:
         P.parse_server(q)
-        assert len(q["expectations"]) == 4  # readout pinned to Z_0..Z_3
-        assert len(q["q_values"]) == 4
+        assert len(q["expectations"]) == 6  # gauges show the whole register
+        assert len(q["q_values"]) == 4      # actions stay pinned to Z_0..Z_3
         assert 0 <= q["action"] < 4
         assert all(-1.0 <= e <= 1.0 for e in q["expectations"])
     # a 6-feature observation feeds the circuit: 5 rays broadcast per car

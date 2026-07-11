@@ -55,6 +55,14 @@ class QuantumQFunction:
         obs = np.asarray(obs, dtype=np.float64)
         return self._sim.forward(obs, self.lam, self.theta)[:, : self.n_actions]
 
+    def all_expectations(self, obs: np.ndarray) -> np.ndarray:
+        """<Z_i> of EVERY qubit, (B, F) -> (B, n_qubits) — the first
+        ``n_actions`` columns are the readout the output head consumes; the
+        rest exist for display (the live qubit gauges show the whole
+        register)."""
+        obs = np.asarray(obs, dtype=np.float64)
+        return self._sim.forward(obs, self.lam, self.theta)
+
     def grad_selected(
         self, obs: np.ndarray, action_idx: np.ndarray, upstream: np.ndarray
     ) -> np.ndarray:

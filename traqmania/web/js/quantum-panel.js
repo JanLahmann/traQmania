@@ -16,6 +16,13 @@ export class QuantumPanel {
     this.pending = null;
     this.gauges = [];
     this.bars = [];
+    // Auto-zoom axis: trained drivers park every <Z> near +1, so a fixed
+    // [-1, 1] axis pins all needles right. Track a rolling range instead
+    // (fast to grow, slow to shrink) and show it under the gauges.
+    this._rangeLo = -1;
+    this._rangeHi = 1;
+    this._rangeEl = document.createElement("p");
+    this._rangeEl.className = "hint qgauge-range";
 
     this._buildGauges(DEFAULT_COUNT);
     this._buildBars(DEFAULT_COUNT);
@@ -32,6 +39,11 @@ export class QuantumPanel {
       const label = document.createElement("span");
       label.className = "qgauge-label";
       label.textContent = `Z${i}`;
+      if (i < 4) {
+        // the first four qubits are the action readout the output head uses
+        row.classList.add("qgauge-readout");
+        label.title = "readout qubit — this ⟨Z⟩ becomes one of the four Q-values";
+      }
       const track = document.createElement("div");
       track.className = "qgauge-track";
       const zero = document.createElement("div");
@@ -44,7 +56,7 @@ export class QuantumPanel {
       value.textContent = "0.00";
       row.append(label, track, value);
       this.gaugesEl.append(row);
-      this.gauges.push({ needle, value });
+      this.gauges.push({ needle, value, zero });
     }
   }
 
@@ -83,10 +95,37 @@ export class QuantumPanel {
 
     const exps = msg.expectations || [];
     if (exps.length && exps.length !== this.gauges.length) this._buildGauges(exps.length);
-    for (let i = 0; i < this.gauges.length; i++) {
-      const v = Math.max(-1, Math.min(1, exps[i] ?? 0));
-      this.gauges[i].needle.style.left = `${((v + 1) / 2) * 100}%`;
-      this.gauges[i].value.textContent = v.toFixed(2);
+    if (exps.length) {
+      // grow the window immediately to include every value; shrink slowly so
+      // the axis breathes instead of jittering
+      const lo = Math.min(...exps);
+      const hi = Math.max(...exps);
+      const shrink = 0.01 * (this._rangeHi - this._rangeLo);
+      this._rangeLo = Math.min(lo, this._rangeLo + shrink);
+      this._rangeHi = Math.max(hi, this._rangeHi - shrink);
+      const pad = 0.06 * (this._rangeHi - this._rangeLo) + 0.005;
+      const axisLo = Math.max(-1, this._rangeLo - pad);
+      const axisHi = Math.min(1, this._rangeHi + pad);
+      const span = axisHi - axisLo || 1e-9;
+      for (let i = 0; i < this.gauges.length; i++) {
+        const v = Math.max(-1, Math.min(1, exps[i] ?? 0));
+        const pct = Math.max(0, Math.min(1, (v - axisLo) / span)) * 100;
+        this.gauges[i].needle.style.left = `${pct}%`;
+        this.gauges[i].value.textContent = v.toFixed(2);
+        const zero = this.gauges[i].zero;
+        if (zero) {
+          const zeroIn = axisLo <= 0 && 0 <= axisHi;
+          zero.style.display = zeroIn ? "" : "none";
+          if (zeroIn) zero.style.left = `${((0 - axisLo) / span) * 100}%`;
+        }
+      }
+      const zoomed = axisHi - axisLo < 1.98;
+      this._rangeEl.textContent = zoomed
+        ? `axis auto-zoomed to ${axisLo.toFixed(2)} … ${axisHi.toFixed(2)} (full scale is −1 … +1)`
+        : "axis: −1 … +1";
+      if (this._rangeEl.parentElement !== this.gaugesEl.parentElement) {
+        this.gaugesEl.after(this._rangeEl);
+      }
     }
 
     const qs = msg.q_values || [];

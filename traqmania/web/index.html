@@ -11,16 +11,16 @@
     <div class="brand">tra<span class="brand-q">Q</span>mania</div>
 
     <nav class="modes" id="mode-buttons" aria-label="Mode">
-      <button data-mode="attract" class="mode-btn">Watch</button>
-      <button data-mode="train" class="mode-btn">Train</button>
-      <button data-mode="evolution" class="mode-btn">Evolution</button>
-      <button data-mode="race" class="mode-btn">Race</button>
-      <button data-mode="hardware" class="mode-btn">Hardware</button>
+      <button data-mode="attract" class="mode-btn" data-tip="Attract mode: the trained quantum circuit drives on its own — watch the gauges and Q-values decide every tenth of a second.">Watch</button>
+      <button data-mode="train" class="mode-btn" data-tip="Train a fresh (or warm-started) agent live with double DQN and watch the learning curve grow.">Train</button>
+      <button data-mode="evolution" class="mode-btn" data-tip="Four snapshots of the same circuit at increasing training ages race each other — see what training buys.">Evolution</button>
+      <button data-mode="race" class="mode-btn" data-tip="Grab the wheel yourself (arrow keys / WASD / gamepad) and race the AI. Named clean laps enter the leaderboard.">Race</button>
+      <button data-mode="hardware" class="mode-btn" data-tip="Run the trained circuit on an IBM Quantum backend — a local noisy simulation, or the real machine (queue times apply).">Hardware</button>
     </nav>
 
     <label class="track-picker">
       <span>Track</span>
-      <select id="track-select" aria-label="Track"></select>
+      <select id="track-select" aria-label="Track" data-tip="Bundled tracks (simple to hard), 🎲 generated surprise tracks, or draw your own with the pencil."></select>
     </label>
     <button type="button" id="track-reroll" class="reroll-btn" title="New random track"
             aria-label="New random track" hidden>🎲</button>
@@ -44,7 +44,7 @@
 
     <label class="qubit-picker">
       <span>Qubits</span>
-      <select id="qubit-select" aria-label="Qubits">
+      <select id="qubit-select" aria-label="Qubits" data-tip="Circuit size: more qubits = more sensors (lidar rays) and parameters. Sample efficiency stays flat; compute per decision grows.">
         <option value="4">4</option>
         <option value="6">6</option>
         <option value="8">8</option>
@@ -97,12 +97,12 @@
         <h2>Live qubit readout</h2>
         <p class="hint" id="qubit-hint">Pauli-Z expectation values &lt;Z<sub>a</sub>&gt; of the 4 qubits — one per action.</p>
         <div id="obs-labels" class="hint"></div>
-        <div id="qgauges"></div>
+        <div id="qgauges" data-tip="Each gauge is a live Pauli-Z expectation value ⟨Z⟩ of one qubit, between −1 and +1. The highlighted first four feed the output head that scores the actions."></div>
         <h2>Q-values</h2>
-        <div id="qbars"></div>
+        <div id="qbars" data-tip="Q-values: the agent's estimate of future reward for each action (steer right, straight, steer left, brake). The tallest bar wins and steers the car — 10 times per second."></div>
         <div id="qaction" class="qaction">—</div>
         <h2>The circuit</h2>
-        <div id="circuit-diagram" class="circuit-scroll"></div>
+        <div id="circuit-diagram" class="circuit-scroll" data-tip="The actual gate sequence being executed: encoding rotations write the sensors onto the qubits (re-uploaded every layer), trainable rotations are the learned weights, CZ gates entangle neighbours."></div>
         <div id="circuit-legend"></div>
       </div>
 
@@ -131,9 +131,9 @@
           </div>
         </form>
         <h2>Learning curves</h2>
-        <canvas id="training-chart" width="340" height="200"></canvas>
+        <canvas id="training-chart" width="340" height="200" data-tip="Learning curve: mean return per episode. Rising = the agent is figuring the track out; the epsilon schedule trades exploration for exploitation."></canvas>
         <h2>Lap times</h2>
-        <canvas id="lap-chart" width="340" height="160"></canvas>
+        <canvas id="lap-chart" width="340" height="160" data-tip="Completed training lap times by episode — watch them drop as the policy improves."></canvas>
         <div id="train-stats"></div>
       </div>
 

@@ -537,6 +537,10 @@ class DemoSession:
         try:
             return generate_track(seed,
                                   resample_spacing=self.config["track"]["resample_spacing"],
+                                  # 0.65: gp-and-tighter corners — the universal
+                                  # driver still laps 10/10 here, and milder
+                                  # settings read as boring under the v2 physics
+                                  difficulty=0.65,
                                   name=f"random #{seed}{suffix}",
                                   length=length)
         except Exception as exc:
@@ -1085,7 +1089,12 @@ class DemoSession:
                 last = self._last_quantum_emit.get(car.id, -math.inf)
                 if self.t - last >= QUANTUM_MSG_MIN_INTERVAL_S:
                     self._last_quantum_emit[car.id] = self.t
-                    expectations = car.qfunc.expectations(obs)[0]
+                    # the gauges show the WHOLE register (the first 4 qubits
+                    # are the action readout the output head consumes)
+                    if hasattr(car.qfunc, "all_expectations"):
+                        expectations = car.qfunc.all_expectations(obs)[0]
+                    else:
+                        expectations = car.qfunc.expectations(obs)[0]
                     self._outbox.append({
                         "type": "quantum",
                         "car_id": car.id,
