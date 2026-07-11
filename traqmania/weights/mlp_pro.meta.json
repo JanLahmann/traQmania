@@ -1,0 +1,15 @@
+{
+  "agent": "mlp",
+  "track": "pro (multi)",
+  "params": 2436,
+  "episodes": 3000,
+  "date": "DATE",
+  "provenance": "best-snapshot, standard double-DQN on the oval+chicane+gp+combo mixture, seed 42, hidden 128, 14-feature observation (9 rays + speed + 4 track scalars)",
+  "greedy_eval": {
+    "oval": "13.8s",
+    "chicane": "13.9s",
+    "gp": "18.9s",
+    "combo": "21.2s",
+    "generated_d0.5": "10/10"
+  }
+}

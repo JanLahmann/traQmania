@@ -171,8 +171,9 @@ family of candidate racing lines and physics-derived braking/speed profiles
 straight from the track geometry, picks the fastest combination by simulating
 itself with the real car physics (crash-free laps only), and tracks it with
 continuous steering — the "perfect drive" ceiling for this car model.
-Measured: oval 13.9 s, chicane 13.9 s, gp 18.4 s, combo 21.5 s — faster than
-every learned driver everywhere — and it handles every generated track. Two
+Measured: oval 13.8 s, chicane 13.9 s, gp 18.2 s, combo 20.3 s — ahead of
+every learned driver everywhere it takes skill (the pro driver ties it on
+the flat-out oval to within 0.03 s) — and it handles every generated track. Two
 talking points: the RL agents get within a few percent of this ceiling on the
 simple tracks (their gap is mostly the 4-action bang-bang control, not
 intelligence — an 8×-bigger trained MLP gets *no* faster), and the hero's
@@ -185,9 +186,10 @@ Expert mode also offers **pro — big classical DQN**: the biggest classical
 agent we train, with the exact same double-DQN recipe as every other agent —
 just more parameters (a wide MLP) and a richer observation (9 lidar rays,
 speed and four track-aware scalars), trained on all four tracks at once.
-It shows what the standard training buys when model size stops being the
-constraint — and how much of the remaining gap to the hero is the 4-action
-control interface rather than learning.
+Measured (seed 42 of 3; the others crash gp): oval 13.8 s, chicane 13.9 s,
+gp 18.9 s, combo 21.2 s and 10/10 generated tracks — the strongest learned
+driver in the demo, a second-plus behind the hero on the hard tracks. That
+gap is the 4-action control interface, not model size.
 
 ## Hardware-mode prerequisites
 

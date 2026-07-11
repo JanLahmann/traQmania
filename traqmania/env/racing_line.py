@@ -68,7 +68,7 @@ def line_candidates(track, physics: dict) -> list[np.ndarray]:
     r_flat = (physics["v_max"] ** 2 + physics["v_turn"] ** 2) / (
         2.0 * physics["k_steer"] * physics["v_turn"])
     candidates = []
-    for margin in (0.85, 1.0, 1.3, 1.6):
+    for margin in (0.35, 0.55, 0.7, 0.85, 1.0, 1.3, 1.6):
         limit = max(0.0, track.half_width - margin)
         off_short = _relax_shortest(center, normals, limit)
         pts_short = center + normals * off_short[:, None]
@@ -186,21 +186,28 @@ class RacingLineController:
 
     def __init__(self, track, physics: dict) -> None:
         self.physics = dict(physics)
-        best, best_lap = None, np.inf
+        scored: list[tuple[float, _LineTracker]] = []
         for line in line_candidates(track, self.physics):
             for lookahead in ((0.5, 3.5, 11.0), (0.4, 3.0, 9.0), (0.62, 4.0, 13.0)):
                 tracker = _LineTracker(line, self.physics, lookahead)
                 lap = _flying_lap(tracker, track, self.physics)
-                if lap < best_lap:
-                    best, best_lap = tracker, lap
-        if best is not None:
-            # stage 2: the profile's v_safe is conservative — probe overspeed
-            # on the winning (line, lookahead); the rollout proves safety
-            for v_scale in (1.05, 1.1, 1.15):
-                tracker = _LineTracker(best.line, self.physics, best.lookahead, v_scale)
-                lap = _flying_lap(tracker, track, self.physics)
-                if lap < best_lap:
-                    best, best_lap = tracker, lap
+                if np.isfinite(lap):
+                    scored.append((lap, tracker))
+        scored.sort(key=lambda pair: pair[0])
+        best = scored[0][1] if scored else None
+        best_lap = scored[0][0] if scored else np.inf
+        # stage 2: the profile's v_safe is conservative — probe overspeed on
+        # the top finishers (different lines tolerate it differently); the
+        # rollout proves each probe crash-free before it can win
+        for _base_lap, base in scored[:3]:
+            for lookahead in (base.lookahead, (0.7, 4.0, 14.0), (0.85, 4.0, 16.0)):
+                for v_scale in (1.0, 1.05, 1.1, 1.15, 1.2, 1.25):
+                    if v_scale == 1.0 and lookahead == base.lookahead:
+                        continue  # that is the stage-1 result itself
+                    tracker = _LineTracker(base.line, self.physics, lookahead, v_scale)
+                    lap = _flying_lap(tracker, track, self.physics)
+                    if lap < best_lap:
+                        best, best_lap = tracker, lap
         if best is None:  # nothing lapped cleanly: safest, widest fallback
             center, normals = track.centerline, track.normals
             limit = max(0.0, track.half_width - 1.6)

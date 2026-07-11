@@ -234,20 +234,23 @@ racing lines from the track geometry (curve-shortening flow, blended wide
 through slow corners), derives brake/accelerate-feasible speed profiles from
 the `[physics]` constants, *simulates itself* on each candidate with the real
 car physics, and drives the fastest provably crash-free combination with
-continuous steering (pure pursuit). Measured: oval 13.9 s, chicane 13.9 s,
-gp 18.4 s, combo 21.5 s — faster than every learned agent on every bundled
-track. Two useful facts follow. First, the RL agents' gap to this ceiling is
+continuous steering (pure pursuit). Measured: oval 13.8 s, chicane 13.9 s,
+gp 18.2 s, combo 20.3 s — ahead of every learned agent wherever braking and
+line choice matter (on the flat-out oval the big trained MLP ties it to
+within 0.03 s: that track is pure path geometry). Two useful facts follow. First, the RL agents' gap to this ceiling is
 mostly their action set: they steer with 4 bang-bang actions at 10 Hz, the
-hero steers continuously — on gp that is worth 2 s per lap (18.4 vs 20.4).
+hero steers continuously — on gp that is worth 2 s per lap (18.2 vs 20.4).
 Second, capacity is not the constraint — an MLP with 8× the parameters
 (hidden width 64, 580 params) trained on the same recipe laps the oval in
 14.2 s, no better than the 76-parameter one. The expert menu's **pro**
 driver takes that question to its limit: the same double-DQN recipe as every
-agent in the demo, with a wide MLP and the rich 14-feature observation
-(9 rays + speed + 4 track scalars), trained on all four tracks at once
-(`mlp_pro.npz`). On this arcade physics, tiny function approximators get
-within a few percent of the ceiling; the remaining gap to the hero is
-dominated by the 4-action control interface, not model size. Hero and pro
+agent in the demo, with a wide MLP (hidden 128, 2,436 params) and the rich
+14-feature observation (9 rays + speed + 4 track scalars), trained on all
+four tracks at once (`mlp_pro.npz`, seed 42 of 3 — the other seeds crash
+gp). Measured: 13.8 / 13.9 / 18.9 / 21.2 s and 10/10 generated tracks — the
+strongest learned driver we have, and still a second-plus behind the hero
+wherever control quality matters. The remaining gap is dominated by the
+4-action interface, not model size. Hero and pro
 laps are excluded from ghost records — records stay with the standard demo
 agents (and humans).
 

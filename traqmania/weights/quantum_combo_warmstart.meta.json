@@ -1,0 +1,7 @@
+{
+  "agent": "quantum",
+  "track": "combo",
+  "episodes": 700,
+  "date": "DATE",
+  "provenance": "pre-first-lap warm-start checkpoint (700 ep, seed 7, combo preset schedule; combo's first clean lap needs ~1100 ep)"
+}
