@@ -60,9 +60,13 @@ warm_start = false
 
 # Per-track overrides merged onto [training] by the server (see server/runtime.py).
 # oval/chicane train fine with the base settings and need no preset.
+# Winning recipe from the v2 overnight sweep (8 decay/gamma combos + lr/sync
+# probes): slow 2000-episode epsilon decay keeps exploration alive long enough
+# to learn braking for the hairpin. Greedy best-snapshot: 20-24 s laps vs 28 s
+# under the old 1200-episode decay.
 [training_presets.gp]
-episodes = 2000
-epsilon_decay_episodes = 1200
+episodes = 3000
+epsilon_decay_episodes = 2000
 gamma = 0.99
 
 # combo has a gp-style hairpin plus a chicane: same long-haul recipe as gp.
@@ -79,15 +83,17 @@ epsilon_decay_episodes = 40
 episodes = 150
 
 # gp needs a longer warm fine-tune (merged on top of [training_warm]).
-# HONEST v2-physics caveat: gp's warm live-training is not currently reliable
-# — from the bundled pre-lap checkpoint, no seed tried lapped within these
-# 500 episodes (the fresh gp run's greedy peak arises during HIGH-epsilon
-# exploration around ep 250, which a low-epsilon fine-tune cannot retrace).
+# HONEST v2-physics caveat: gp warm live-training is a coin flip. This
+# schedule retraces the tail of the winning fresh recipe from the bundled
+# ep-1100 pre-lap checkpoint and lapped on 2 of 3 seeds tried (~20-40 s
+# wall); other schedules probed (shorter, longer, hotter) did worse. When
+# it misses, it misses the whole 900 episodes — gp's braking discovery
+# stays exploration-luck-dependent even warm-started.
 # oval/chicane lap in ~2-3 s and combo in ~9 s of warm training.
 [training_warm_gp]
-epsilon_start = 0.35
-epsilon_decay_episodes = 150
-episodes = 500
+epsilon_start = 0.45
+epsilon_decay_episodes = 850
+episodes = 900
 gamma = 0.99
 
 [server]

@@ -1,8 +1,8 @@
 {
   "agent": "quantum",
   "track": "gp",
-  "config_hash": "28c95c35a3c5",
-  "episodes": 200,
+  "config_hash": "038a66243191",
+  "episodes": 1100,
   "provenance": "pre-first-lap checkpoint (make_stages warmstart export)",
   "date": "2026-07-11"
 }

@@ -53,7 +53,7 @@ def test_resolve_training_cfg_presets_and_warm():
     assert base == config["training"]
 
     gp = resolve_training_cfg(config, "gp")
-    assert (gp["episodes"], gp["epsilon_decay_episodes"], gp["gamma"]) == (2000, 1200, 0.99)
+    assert (gp["episodes"], gp["epsilon_decay_episodes"], gp["gamma"]) == (3000, 2000, 0.99)
 
     warm = resolve_training_cfg(config, "oval", warm=True)
     assert warm["episodes"] == 150
@@ -61,10 +61,10 @@ def test_resolve_training_cfg_presets_and_warm():
     assert warm["epsilon_decay_episodes"] == 40
 
     warm_gp = resolve_training_cfg(config, "gp", warm=True)
-    assert warm_gp["episodes"] == 500
-    assert warm_gp["epsilon_start"] == 0.35
+    assert warm_gp["episodes"] == 900
+    assert warm_gp["epsilon_start"] == 0.45
     assert warm_gp["epsilon_end"] == 0.05  # inherited from [training_warm]
-    assert warm_gp["epsilon_decay_episodes"] == 150
+    assert warm_gp["epsilon_decay_episodes"] == 850
     assert warm_gp["gamma"] == 0.99
 
 

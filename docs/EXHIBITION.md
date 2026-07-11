@@ -111,9 +111,9 @@ A narrative that works cold, in order. Controls for the race segment:
    improving. Mention: *"This is real double-DQN training against a
    simulated version of the circuit — the same math IBM's 2020 quantum-RL
    paper used."* (Without warm start a full cold run on oval is ~18 s to the
-   first clean lap — still demoable; on a Pi, warm only. gp's warm recipe is
-   currently unreliable under the v2 physics — demo warm training on the
-   other three tracks.)
+   first clean lap — still demoable; on a Pi, warm only. gp's warm training
+   is a coin flip — it laps in ~20–40 s on most seeds but can miss outright,
+   so prefer the other three tracks for a guaranteed payoff.)
 
 3. **Evolution — "the same circuit at four ages"** (~30 s).
    Mode **Evolution**: four numbered, colour-coded cars drive weights
@@ -260,7 +260,7 @@ the exhibition profile or `--host 0.0.0.0`.
 **Choppy rendering / sluggish Pi:** use the right profile (`--profile pi4` or
 `pi5` — lower broadcast/telemetry rates, smaller training batches). Train
 warm-start only, keep episodes modest, and prefer oval/chicane; gp is the
-heavyweight track (cold training takes ~2000 episodes). Close other browser
+heavyweight track (cold training takes ~3000 episodes). Close other browser
 tabs — the canvas renderer is cheap but not free.
 
 **"training is already running" / "cannot change track while training is

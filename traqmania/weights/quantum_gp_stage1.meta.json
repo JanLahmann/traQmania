@@ -1,7 +1,7 @@
 {
   "agent": "quantum",
   "track": "gp",
-  "config_hash": "28c95c35a3c5",
+  "config_hash": "038a66243191",
   "episodes": 50,
   "stage": 1,
   "eval_episodes": 4,

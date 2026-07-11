@@ -54,19 +54,20 @@ hairpin discipline, so speed *varies* visibly — the model-based hero driver's
 max/min speed ratio is 1.81 on gp and 1.79 on combo (≈1.5 before), while the
 oval and chicane corners are gentle enough to stay flat-out at any of these
 speeds. The flip side, reported honestly below: the harder approach speeds
-make gp and combo tougher for the 4-qubit circuit — its best laps there are
-slower than they were under v1, and fresh training on combo no longer laps
-at all (only warm-started runs do).
+make gp and combo tougher for the 4-qubit circuit — an overnight recipe
+sweep won back most of the gp gap (slower epsilon decay; seed-robust,
+laps at 3/3 seeds), while fresh training on combo still never laps
+(only warm-started runs do).
 
 | Track | Quantum first clean lap | Best lap (greedy best-snapshot) | Classical MLP best lap |
 |---|---|---|---|
 | oval | ~18 s training (ep ≈ 381) | 14.1 s | 13.2 s |
 | chicane | ~25 s training (ep ≈ 450) | 12.5 s | 13.5 s |
-| gp | ~107 s training (ep ≈ 1451) | 27.8 s | 20.3 s |
+| gp | ~123 s training (ep ≈ 1794) | 23.2 s | 20.3 s |
 | combo | ~79 s training (ep ≈ 1034, warm-started) | 27.5 s | 30.8 s |
 
 **Scaling qubits vs engineering features** (oval; greedy best-snapshot eval,
-seed 42). Extra qubits widen the observation register: either more lidar rays
+bundled driver's seed). Extra qubits widen the observation register: either more lidar rays
 ("rays + speed") or hand-engineered features (track curvature ahead,
 corner-speed ratio, lateral offset, heading error):
 
@@ -80,14 +81,15 @@ corner-speed ratio, lateral offset, heading error):
 Sample efficiency stays roughly flat from 4 to 10 qubits (first clean lap
 between episode ~200 and ~515 everywhere); what grows is per-decision compute,
 as the statevector goes 16 → 1024 amplitudes (fastsim greedy: ≲1 ms per
-decision at 4–6 qubits, ~1.2–2 ms at 8, ~5–9 ms at 10). Under the v2 physics
-the feature story flipped mid-scale: engineered features still help at 6–8
-qubits (12.5 s at `q8` with features), but the fastest quantum lap in the
-demo is now the plain 9-ray `q10` driver at 12.0 s. The matched MLP baselines
-(92–124 params, ~0.01 ms/decision) do not benefit from the features (13.0 s
-with vs 12.5 s without at the q6 observation) and still match or beat every
-quantum lap — 11.9 s at the q10 observation vs quantum's 12.0 s is the
-closest the two have ever been, but it stays parity, not advantage.
+decision at 4–6 qubits, ~1.2–2 ms at 8, ~5–9 ms at 10). Seed-honesty from
+the three-seed spreads: the table quotes seed 42, but the ranges overlap —
+the q10 driver's 12.0 s headline is the best of three seeds (spread
+12.0–14.2 s), and the apparent feature win at q8 (12.5 s) does not survive
+its spread either (12.5–13.8 s vs plain q8's 12.5–13.3 s; details in
+docs/SCIENCE.md). The matched MLP baselines (92–124 params,
+~0.01 ms/decision) still match or beat every quantum lap — 11.9 s at the
+q10 observation vs quantum's 12.0 s is the closest the two have ever been,
+but it stays parity, not advantage.
 `quantum_oval_q8.npz`, `quantum_chicane_q8.npz` and the q10 pair now ship, so
 the Qubits selector works out of the box for oval and chicane at every size;
 gp/combo remain honestly untrained above 4 qubits.
@@ -102,7 +104,9 @@ notes: under the v2 physics, *fresh* multi-track training no longer produces
 a fully universal driver (4 runs tried — the best laps oval/chicane and 9/10
 generated tracks but fails gp and combo outright); warm-migrating the old
 universal driver into the new physics is what preserves full coverage, at
-the price of slow laps on the two hard tracks.
+the price of slow laps on the two hard tracks — and that migration worked at
+one seed of three (the other two collapse to oval specialists; see
+docs/SCIENCE.md).
 
 Why we train on a simulator and run inference on hardware: one double-DQN update is
 **~3.4 ms** with the numpy statevector + adjoint path vs **~20.5 s** with

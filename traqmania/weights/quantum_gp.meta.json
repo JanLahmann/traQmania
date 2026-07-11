@@ -1,7 +1,8 @@
 {
   "agent": "quantum",
   "track": "gp",
-  "config_hash": "7975738f8d67",
-  "episodes": 2000,
-  "date": "DATE"
+  "config_hash": "fe9b775eec49",
+  "episodes": 3000,
+  "provenance": "overnight sweep winner (epsilon_decay 2000, gamma 0.99, seed 42); greedy eval 2 seeds x 8 eps: 23 laps, best 20.1 s",
+  "date": "2026-07-11"
 }
