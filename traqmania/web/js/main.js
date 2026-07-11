@@ -50,7 +50,7 @@ initInput(() => attract.notifyActivity(), {
 
 // -- helpers -----------------------------------------------------------------
 
-const KIND_NAMES = { quantum: "Quantum", mlp: "MLP", human: "You" };
+const KIND_NAMES = { quantum: "Quantum", mlp: "MLP", human: "You", hero: "Hero", pro: "Pro" };
 
 function fmtLap(t) {
   if (typeof t !== "number" || !isFinite(t)) return "—";
@@ -139,10 +139,11 @@ function applyDrivers(drivers, current) {
   const label = (d) =>
     d === "auto" ? "auto (this track)"
     : d === "hero" ? "hero — racing line"
+    : d === "pro" ? "pro — big classical DQN"
     : `${d}-trained`;
   sel.replaceChildren(
     ...(drivers || ["auto"])
-      .filter((d) => EXPERT || d !== "hero")
+      .filter((d) => EXPERT || (d !== "hero" && d !== "pro"))
       .map((d) => {
         const opt = document.createElement("option");
         opt.value = d;
@@ -150,7 +151,9 @@ function applyDrivers(drivers, current) {
         return opt;
       }),
   );
-  sel.value = (current !== "hero" || EXPERT) && current ? current : "auto";
+  sel.value =
+    current && (EXPERT || (current !== "hero" && current !== "pro"))
+      ? current : "auto";
 }
 
 /** Ask for a generated track: typed seed (empty -> fresh roll) + length. */

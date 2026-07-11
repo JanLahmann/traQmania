@@ -181,6 +181,14 @@ the first hero lap on a track pauses ~5-8 s while the candidate search runs
 (cached afterwards), and hero laps never become ghost records — the record
 board stays reserved for learned and human drivers.
 
+Expert mode also offers **pro — big classical DQN**: the biggest classical
+agent we train, with the exact same double-DQN recipe as every other agent —
+just more parameters (a wide MLP) and a richer observation (9 lidar rays,
+speed and four track-aware scalars), trained on all four tracks at once.
+It shows what the standard training buys when model size stops being the
+constraint — and how much of the remaining gap to the hero is the 4-action
+control interface rather than learning.
+
 ## Hardware-mode prerequisites
 
 - Install the hardware extra (not needed for anything else):

@@ -6,6 +6,7 @@ export const KIND_COLORS = {
   mlp: "#2fbf71",
   human: "#ff9f1c",
   hero: "#22d3ee", // expert-menu racing-line controller
+  pro: "#5eead4", // expert-menu big DQN-trained MLP
 };
 
 // Evolution mode: one colour per training stage (cool -> hot as training

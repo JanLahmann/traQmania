@@ -241,10 +241,15 @@ mostly their action set: they steer with 4 bang-bang actions at 10 Hz, the
 hero steers continuously — on gp that is worth 2 s per lap (18.4 vs 20.4).
 Second, capacity is not the constraint — an MLP with 8× the parameters
 (hidden width 64, 580 params) trained on the same recipe laps the oval in
-14.2 s, no better than the 76-parameter one. On this arcade physics, tiny
-function approximators get within a few percent of the ceiling on simple
-tracks; the hard tracks are where control quality still pays. Hero laps are
-excluded from ghost records — records are for learned (or human) drivers.
+14.2 s, no better than the 76-parameter one. The expert menu's **pro**
+driver takes that question to its limit: the same double-DQN recipe as every
+agent in the demo, with a wide MLP and the rich 14-feature observation
+(9 rays + speed + 4 track scalars), trained on all four tracks at once
+(`mlp_pro.npz`). On this arcade physics, tiny function approximators get
+within a few percent of the ceiling; the remaining gap to the hero is
+dominated by the 4-action control interface, not model size. Hero and pro
+laps are excluded from ghost records — records stay with the standard demo
+agents (and humans).
 
 ## Honest claims
 

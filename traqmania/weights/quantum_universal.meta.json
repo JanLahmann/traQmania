@@ -1,15 +1,15 @@
 {
   "agent": "quantum",
   "track": "universal",
-  "config_hash": "ed96ae593b5c",
-  "episodes": 2500,
+  "config_hash": "f0d116a00db4",
+  "episodes": 3000,
   "date": "DATE",
-  "provenance": "best-snapshot of --track multi (oval+chicane+gp round-robin), seed 42, 2500 episodes, gamma 0.99, epsilon decay 1500",
+  "provenance": "best-snapshot of --track multi (oval+chicane+gp+combo round-robin), seed 0, 3000 episodes, gamma 0.99, epsilon decay 1500 (universal v2; all 3 seeds of this recipe lap all four bundled tracks)",
   "greedy_eval": {
-    "oval": "laps, best 14.3s",
-    "chicane": "laps, best 14.8s",
-    "gp": "laps, best 25.7s (the gp specialist does 20.4s)",
-    "generated_d0.5": "10/10, best 12.5s median 26.9s",
-    "generated_d0.8": "7/10, best 12.6s median 33.4s"
+    "oval": "best 15.1s",
+    "chicane": "best 15.4s",
+    "gp": "best 21.7s",
+    "combo": "best 26.8s",
+    "generated_d0.5": "10/10, best 14.4s median 35.2s"
   }
 }

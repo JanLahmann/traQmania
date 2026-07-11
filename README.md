@@ -84,16 +84,16 @@ the matched MLP baselines (92–124 params: 13.5–14.1 s rays-only vs 14.1–14
 with features, ~0.01 ms/decision) — yet the MLP still matches or beats every
 quantum lap time, so this stays parity, not advantage.
 
-**One driver, every track**: training a single 4-qubit circuit on all three
-tracks round-robin (2500 episodes, seed 42) yields a bundled **universal**
-driver that laps oval (14.3 s), chicane (14.8 s), gp (25.7 s — the gp
-specialist does 20.4 s) *and* 10/10 unseen generated tracks at medium
-difficulty (best 12.5 s). Transfer has limits: the **combo** track's blind
-inward hairpins (added after it was trained) defeat it zero-shot — combo gets
-its own specialist. Specialists stay faster at home; the egocentric
-lidar-and-speed observation is what makes the transfer work. Seed-honesty:
-2 of 3 seeds failed to generalize to gp — the bundled weights are the seed
-that did.
+**One driver, every track**: training a single 4-qubit circuit on all four
+tracks round-robin (3000 episodes) yields a bundled **universal** driver that
+laps oval (15.1 s), chicane (15.4 s), gp (21.7 s), combo (26.8 s) *and*
+10/10 unseen generated tracks at medium difficulty (best 14.4 s) — and this
+recipe is seed-robust: all 3 seeds tried produce fully universal drivers.
+Specialists stay faster at home; the egocentric lidar-and-speed observation
+is what makes the transfer work. Two honest history notes: a v1 trained on
+only three tracks was defeated zero-shot by combo's blind inward hairpins
+(transfer has limits), and with the hard tracks missing from the mix only 1
+of 3 seeds generalized.
 
 Why we train on a simulator and run inference on hardware: one double-DQN update is
 **~3.4 ms** with the numpy statevector + adjoint path vs **~20.5 s** with

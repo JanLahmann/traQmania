@@ -291,7 +291,9 @@ class DemoSession:
         return ["auto"] + [
             name for name in ("oval", "chicane", "gp", "universal")
             if quantum_weights_path(name, self.n_qubits).is_file()
-        ] + ["hero"]
+        ] + ["hero"] + (
+            ["pro"] if (WEIGHTS_DIR / "mlp_pro.npz").is_file() else []
+        )
 
     def _obs_labels(self) -> list[str]:
         """Display names of the observation features feeding the circuit,
@@ -355,7 +357,7 @@ class DemoSession:
     # -------------------------------------------------------- weight resolution
 
     def _quantum_weights_path(self, suffix: str = "") -> Path:
-        if suffix == "" and self.driver not in ("auto", "hero"):
+        if suffix == "" and self.driver not in ("auto", "hero", "pro"):
             # explicit driver pick: that training's weights, whatever the track
             # ("hero" has no weights — quantum cars fall through to the track
             # specialist while the hero pick only affects the attract car)
@@ -406,8 +408,8 @@ class DemoSession:
         if mode == "hardware" and self.track_is_random:
             # the hardware runner loads tracks by bundled name (Track.load)
             return "hardware execution needs a bundled track"
-        if mode == "attract" and self.driver == "hero":
-            return None  # model-based controller: works on any track, no weights
+        if mode == "attract" and self.driver in ("hero", "pro"):
+            return None  # reference drivers work on any track
         if mode in ("attract", "hardware"):
             return self._agent_unavailable("quantum")
         if mode == "race":
@@ -555,26 +557,39 @@ class DemoSession:
         self._outbox.append(self.welcome_payload())
 
     def _enter_attract(self) -> None:
-        if self.driver == "hero":
-            self.cars = [self._make_hero_car()]
+        if self.driver in ("hero", "pro"):
+            self.cars = [self._make_hero_car(self.driver)]
             return
         car = self._try_make_agent_car("quantum")
         self.cars = [car] if car is not None else []
 
-    def _make_hero_car(self) -> _Car:
-        """The expert-demo reference car: continuous-control racing-line
-        tracking computed from the track geometry — honestly labelled as
-        model-based, not learned."""
-        from traqmania.env.racing_line import RacingLineController
-
-        key = ("hero", self.track_name, "")
+    def _make_hero_car(self, which: str = "hero") -> _Car:
+        """The expert-demo reference cars, honestly labelled: "hero" is the
+        model-based racing-line controller (not learned), "pro" the biggest
+        classical MLP we train — same double-DQN recipe as every other agent,
+        just more parameters and a richer observation."""
+        key = (which, self.track_name, "")
         if key not in self._agent_cache:
-            self._agent_cache[key] = RacingLineController(
-                self.track, self.config["physics"])
+            if which == "hero":
+                from traqmania.env.racing_line import RacingLineController
+
+                self._agent_cache[key] = RacingLineController(
+                    self.track, self.config["physics"])
+            else:
+                from traqmania.env.pro import N_FEATURES, ProController
+
+                params = np.load(WEIGHTS_DIR / "mlp_pro.npz")["params"]
+                hidden = (params.size - N_ACTIONS) // (N_FEATURES + 1 + N_ACTIONS)
+                qfunc = MLPQFunction(n_features=N_FEATURES, hidden=hidden,
+                                     n_actions=N_ACTIONS)
+                qfunc.set_params(params)
+                self._agent_cache[key] = ProController(
+                    self.track, self.config["physics"], qfunc)
+        label = ("driver: racing line (model-based, not learned)" if which == "hero"
+                 else "driver: pro (classical DQN, big MLP)")
         x, y, theta = self.track.start_pose()
-        car = _Car(id="hero", kind="hero", state=np.array([x, y, theta, 0.0]),
-                   controller=self._agent_cache[key],
-                   label="driver: racing line (model-based, not learned)")
+        car = _Car(id=which, kind=which, state=np.array([x, y, theta, 0.0]),
+                   controller=self._agent_cache[key], label=label)
         self._respawn(car)
         return car
 
@@ -1091,6 +1106,8 @@ class DemoSession:
             return "human"
         if car.kind == "hero":
             return "racing line (model-based)"
+        if car.kind == "pro":
+            return "pro (classical DQN, big MLP)"
         if car.label and car.label.startswith("driver: "):
             return car.label[len("driver: "):]
         if car.kind == "quantum":
@@ -1101,7 +1118,7 @@ class DemoSession:
         """Persist a clean lap as the track's best-lap ghost when it beats the record."""
         if self.track_is_random:  # ephemeral tracks: never write ghosts_dir/random*.json
             return
-        if car.kind == "hero":  # the model-based reference never sets records
+        if car.kind in ("hero", "pro"):  # reference drivers never set records
             return
         if not car.traj_full or len(car.traj) < 2:
             return

@@ -83,6 +83,25 @@ def test_hero_driver_laps_without_weights(session):
     assert session._quantum_weights_path().name == "quantum_oval.npz"
 
 
+def test_pro_driver_laps(session):
+    # the biggest classical agent: same DQN recipe, more parameters,
+    # rich observation; bundled as mlp_pro.npz
+    from traqmania.server.session import WEIGHTS_DIR
+
+    if not (WEIGHTS_DIR / "mlp_pro.npz").is_file():
+        pytest.skip("no bundled pro weights")
+    assert "pro" in session.available_drivers()
+    session.handle_message(P.SetDriver(driver="pro"))
+    msgs = session.drain_outbox()
+    assert not by_type(msgs, "error")
+    car = session.cars[0]
+    assert car.kind == "pro"
+    assert "classical DQN" in car.label
+    for _ in range(60 * 25):  # 25 s of sim: enough for an oval lap
+        session.tick()
+    assert car.lap >= 1
+
+
 def test_hero_driver_on_generated_track(session):
     pytest.importorskip("traqmania.env.trackgen")
     session.handle_message(P.SetDriver(driver="hero"))

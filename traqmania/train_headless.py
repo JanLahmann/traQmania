@@ -29,7 +29,7 @@ from traqmania.env.track import Track
 
 WEIGHTS_DIR = Path(__file__).resolve().parent / "weights"
 REPORT_EVERY = 20  # episodes per mean-return line
-MULTI_TRACK_NAMES = ("oval", "chicane", "gp")  # the --track multi mixture
+MULTI_TRACK_NAMES = ("oval", "chicane", "gp", "combo")  # the --track multi mixture
 
 
 class CleanLapMonitor:
@@ -71,7 +71,9 @@ class CleanLapMonitor:
 def build_qfunc(agent: str, n_features: int, seed: int, config: dict):
     """Q-function factory: classical MLP baseline or the quantum circuit."""
     if agent == "mlp":
-        return MLPQFunction(n_features=n_features, n_actions=N_ACTIONS, seed=seed)
+        hidden = int(config.get("mlp", {}).get("hidden", 8))
+        return MLPQFunction(n_features=n_features, hidden=hidden,
+                            n_actions=N_ACTIONS, seed=seed)
     if agent == "quantum":
         # numpy-only fast path (fastsim + adjoint); keeps headless training qiskit-free
         from traqmania.agents.quantum.qdqn import QuantumQFunction
