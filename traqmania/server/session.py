@@ -1101,6 +1101,8 @@ class DemoSession:
         """Persist a clean lap as the track's best-lap ghost when it beats the record."""
         if self.track_is_random:  # ephemeral tracks: never write ghosts_dir/random*.json
             return
+        if car.kind == "hero":  # the model-based reference never sets records
+            return
         if not car.traj_full or len(car.traj) < 2:
             return
         if self._ghost is not None and lap_time >= self._ghost["lap_time"]:

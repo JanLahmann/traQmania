@@ -167,17 +167,19 @@ A narrative that works cold, in order. Controls for the race segment:
 Open the demo with `#expert` in the URL (`http://127.0.0.1:8000/#expert`) and
 the Watch-mode Driver dropdown gains **hero — racing line**: a cyan car driven
 by a model-based controller, *not* a learned agent. It computes the
-curvature-minimizing racing line and a physics-derived braking/speed profile
-straight from the track geometry and tracks it with continuous steering — the
-"perfect drive" ceiling for this car model. Measured: oval 14.0 s, chicane
-14.0 s, gp 19.8 s, combo 22.6 s, and it handles every generated track. Two talking points:
-the RL agents are surprisingly close to this ceiling on the simple tracks
-(their gap is mostly the 4-action bang-bang control, not intelligence — an
-8×-bigger trained MLP gets *no* faster), and the hero's line visibly differs
-(apex-cutting, earlier braking). It is near-optimal, not provably optimal: on
-combo the trained quantum specialist actually beats it (21.7 vs 22.6 s). Its clean laps become ghosts labelled
-"racing line (model-based)"; delete `traqmania/data/ghosts/<track>.json` (or
-your `--ghosts-dir` equivalent) to reset a track's record before a show.
+family of candidate racing lines and physics-derived braking/speed profiles
+straight from the track geometry, picks the fastest combination by simulating
+itself with the real car physics (crash-free laps only), and tracks it with
+continuous steering — the "perfect drive" ceiling for this car model.
+Measured: oval 13.9 s, chicane 13.9 s, gp 18.4 s, combo 21.5 s — faster than
+every learned driver everywhere — and it handles every generated track. Two
+talking points: the RL agents get within a few percent of this ceiling on the
+simple tracks (their gap is mostly the 4-action bang-bang control, not
+intelligence — an 8×-bigger trained MLP gets *no* faster), and the hero's
+line visibly differs (wide entries into hairpins, earlier braking). Notes:
+the first hero lap on a track pauses ~5-8 s while the candidate search runs
+(cached afterwards), and hero laps never become ghost records — the record
+board stays reserved for learned and human drivers.
 
 ## Hardware-mode prerequisites
 

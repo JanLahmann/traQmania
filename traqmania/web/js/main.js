@@ -202,9 +202,10 @@ function renderLapboard(cars) {
     if (car.ghost) {
       // ghosts stay off the board except for a dim "Ghost (best …)" entry
       const t = typeof best === "number" ? best : car.last_lap_time;
+      // car.label carries the record's provenance ("best 14.2s · universal")
       const text =
         typeof t === "number" && isFinite(t)
-          ? `Ghost (best ${fmtLap(t)})`
+          ? `Ghost (${car.label || `best ${fmtLap(t)}`})`
           : car.label
             ? `Ghost — ${car.label}`
             : "Ghost";
