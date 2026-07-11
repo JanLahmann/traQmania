@@ -24,6 +24,21 @@
     </label>
     <button type="button" id="track-reroll" class="reroll-btn" title="New random track"
             aria-label="New random track" hidden>🎲</button>
+    <input type="text" id="track-seed" class="seed-input" inputmode="numeric"
+           placeholder="seed" aria-label="Random track seed" hidden
+           title="Type a saved seed and press 🎲 (or Enter) to reload that exact track; leave empty for a fresh one">
+    <select id="track-length" class="length-select" aria-label="Random track length" hidden
+            title="Random track length (long laps are for driving, not training)">
+      <option value="short">short</option>
+      <option value="medium" selected>medium</option>
+      <option value="long">long</option>
+    </select>
+
+    <label class="driver-picker" id="driver-picker" hidden
+           title="Which training the quantum driver uses — try the gp-trained driver on another track">
+      <span>Driver</span>
+      <select id="driver-select" aria-label="Quantum driver"></select>
+    </label>
 
     <label class="qubit-picker">
       <span>Qubits</span>

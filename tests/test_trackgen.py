@@ -67,6 +67,29 @@ def test_generate_track_30_seeds_pass_validation(difficulty):
         assert 100.0 < track.total_length < 1500.0
 
 
+def test_generate_track_length_presets():
+    short = generate_track(seed=9, length="short")
+    medium = generate_track(seed=9)
+    long_ = generate_track(seed=9, length="long")
+    assert short.total_length <= 430.0  # short/medium laps fit the episode cap
+    assert medium.total_length <= 660.0
+    assert long_.total_length <= 1310.0
+    assert short.total_length < long_.total_length
+    # deterministic per (seed, length); "medium" is the default
+    np.testing.assert_array_equal(
+        long_.centerline, generate_track(seed=9, length="long").centerline
+    )
+    np.testing.assert_array_equal(
+        medium.centerline, generate_track(seed=9, length="medium").centerline
+    )
+    with pytest.raises(ValueError, match="length"):
+        generate_track(seed=9, length="epic")
+    for length in ("short", "long"):
+        for seed in range(20):
+            track = generate_track(seed, length=length)
+            assert track.generation_attempts <= 15
+
+
 def test_harder_tracks_are_tighter_and_narrower():
     easy = generate_track(seed=11, difficulty=0.0)
     hard = generate_track(seed=11, difficulty=1.0)

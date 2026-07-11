@@ -12,6 +12,7 @@ from dataclasses import asdict, dataclass
 from typing import Any, ClassVar
 
 MODES = ("attract", "train", "race", "evolution", "hardware")
+TRACK_LENGTHS = ("short", "medium", "long")  # generated-track size presets
 TRAIN_AGENTS = ("quantum", "mlp", "both")
 OPPONENTS = ("quantum", "mlp")
 TRAIN_ACTIONS = ("start", "stop")
@@ -60,11 +61,14 @@ class SetMode:
 
 @dataclass(frozen=True)
 class SetTrack:
-    """``seed`` is only meaningful with ``track == "random"``: it makes the
-    generated track reproducible (omitted -> the server rolls a fresh one)."""
+    """``seed`` and ``length`` are only meaningful with ``track == "random"``:
+    ``seed`` makes the generated track reproducible (omitted -> the server
+    rolls a fresh one) and ``length`` picks a size preset (short / medium /
+    long; omitted -> medium)."""
 
     track: str
     seed: int | None = None
+    length: str | None = None
     TYPE: ClassVar[str] = "set_track"
 
 
@@ -93,6 +97,18 @@ class Qubits:
 
     n: int
     TYPE: ClassVar[str] = "qubits"
+
+
+@dataclass(frozen=True)
+class SetDriver:
+    """Pick which trained quantum weights drive the agent car: "auto" (the
+    current track's specialist / honest random-track fallback) or a bundled
+    training name like "oval" / "chicane" / "gp" / "universal". The server
+    validates against ``welcome.drivers`` (what is actually bundled at the
+    active qubit count)."""
+
+    driver: str
+    TYPE: ClassVar[str] = "set_driver"
 
 
 @dataclass(frozen=True)
@@ -140,6 +156,8 @@ class Welcome:
     circuit_spec: dict
     ui: dict
     obs_labels: list | None = None  # display names of the observation features
+    driver: str = "auto"  # active quantum driver selection (see SetDriver)
+    drivers: tuple = ("auto",)  # driver choices bundled at this qubit count
     TYPE: ClassVar[str] = "welcome"
 
 
@@ -217,7 +235,7 @@ class Error:
 # like telemetry.loss and car.last_lap_time stay as explicit nulls).
 _OMIT_IF_NONE: dict[str, set[str]] = {
     Input.TYPE: {"steer", "throttle", "brake"},
-    SetTrack.TYPE: {"seed"},
+    SetTrack.TYPE: {"seed", "length"},
     Welcome.TYPE: {"obs_labels"},
     Train.TYPE: {"track", "episodes"},
     Race.TYPE: {"track"},
@@ -347,10 +365,12 @@ def _parse_set_mode(d: dict) -> SetMode:
 
 
 def _parse_set_track(d: dict) -> SetTrack:
-    _check_extra(d, {"track", "seed"})
+    _check_extra(d, {"track", "seed", "length"})
     return SetTrack(
         track=_str(_req(d, "track"), "track"),
         seed=_int(d["seed"], "seed", 0) if d.get("seed") is not None else None,
+        length=_enum(d["length"], "length", TRACK_LENGTHS)
+        if d.get("length") is not None else None,
     )
 
 
@@ -379,6 +399,11 @@ def _parse_qubits(d: dict) -> Qubits:
     return Qubits(n=_int(_req(d, "n"), "n", 1))
 
 
+def _parse_set_driver(d: dict) -> SetDriver:
+    _check_extra(d, {"driver"})
+    return SetDriver(driver=_str(_req(d, "driver"), "driver"))
+
+
 def _parse_hardware(d: dict) -> HardwareMsg:
     _check_extra(d, {"action", "backend", "iterations", "shots", "max_decisions"})
     return HardwareMsg(
@@ -400,13 +425,14 @@ _CLIENT_PARSERS = {
     Train.TYPE: _parse_train,
     Race.TYPE: _parse_race,
     Qubits.TYPE: _parse_qubits,
+    SetDriver.TYPE: _parse_set_driver,
     HardwareMsg.TYPE: _parse_hardware,
 }
 
 
 def parse_client(
     data: Any,
-) -> Hello | Input | SetMode | SetTrack | Train | Race | Qubits | HardwareMsg:
+) -> Hello | Input | SetMode | SetTrack | Train | Race | Qubits | SetDriver | HardwareMsg:
     """Strictly parse a client -> server dict; raises ProtocolError on anything off."""
     if not isinstance(data, dict):
         raise ProtocolError("message must be a JSON object")
@@ -453,6 +479,9 @@ def _parse_welcome(d: dict) -> Welcome:
         ui=dict(_req(d, "ui")),
         obs_labels=[_str(s, "obs_labels[]") for s in d["obs_labels"]]
         if d.get("obs_labels") is not None else None,
+        driver=_str(d["driver"], "driver") if d.get("driver") is not None else "auto",
+        drivers=tuple(_str(x, "drivers[]") for x in d["drivers"])
+        if d.get("drivers") is not None else ("auto",),
     )
 
 

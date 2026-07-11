@@ -81,8 +81,13 @@ button.active {
   color: #fff;
 }
 
+[hidden] {
+  display: none !important; /* the hidden attribute must beat display:flex rules */
+}
+
 select,
-input[type="number"] {
+input[type="number"],
+.seed-input {
   font: inherit;
   color: var(--text);
   background: var(--bg-inset);
@@ -119,6 +124,7 @@ input[type="number"] {
 
 .track-picker,
 .qubit-picker,
+.driver-picker,
 #race-controls label {
   display: flex;
   align-items: center;
@@ -129,6 +135,15 @@ input[type="number"] {
 .reroll-btn {
   margin-left: -12px; /* tuck against the track picker despite the topbar gap */
   padding: 4px 8px;
+}
+
+.seed-input {
+  width: 8ch;
+  margin-left: -12px; /* same tuck as the reroll button */
+}
+
+.length-select {
+  margin-left: -12px;
 }
 
 #race-controls {
@@ -620,6 +635,91 @@ input[type="number"] {
 .explain-body em {
   color: var(--quantum);
   font-style: normal;
+}
+
+/* -- docs browser (Explain -> Documentation) -------------------------------- */
+
+.doc-picker {
+  margin-bottom: 12px;
+  max-width: 100%;
+}
+
+.doc-note {
+  color: var(--muted);
+}
+
+.md {
+  line-height: 1.55;
+}
+
+.md h1,
+.md h2,
+.md h3 {
+  margin: 18px 0 8px;
+}
+
+.md p,
+.md ul,
+.md ol,
+.md blockquote {
+  margin: 8px 0;
+}
+
+.md ul,
+.md ol {
+  padding-left: 22px;
+}
+
+.md pre {
+  background: var(--bg-inset);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 10px 12px;
+  overflow-x: auto;
+}
+
+.md code {
+  background: var(--bg-inset);
+  border-radius: 4px;
+  padding: 1px 4px;
+  font-size: 0.92em;
+}
+
+.md pre code {
+  background: none;
+  padding: 0;
+}
+
+.md img {
+  max-width: 100%;
+  border-radius: 6px;
+}
+
+.md blockquote {
+  border-left: 3px solid var(--border);
+  padding-left: 10px;
+  color: var(--muted);
+}
+
+.md-table-wrap {
+  overflow-x: auto;
+  margin: 10px 0;
+}
+
+.md table {
+  border-collapse: collapse;
+  font-size: 0.95em;
+}
+
+.md th,
+.md td {
+  border: 1px solid var(--border);
+  padding: 5px 9px;
+  text-align: left;
+}
+
+.md th {
+  background: var(--bg-inset);
 }
 
 /* -- bottom bar ---------------------------------------------------------------- */

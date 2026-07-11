@@ -90,10 +90,17 @@ export function send(type, payload = {}) {
  *  present the server uses these instead of the keys bitmask (send keys:0). */
 export const sendInput = (keys, analog) => send("input", analog ? { keys, ...analog } : { keys });
 export const setMode = (mode) => send("set_mode", { mode });
-/** `seed` (optional, track "random" only) reproduces a specific generated track. */
-export const setTrack = (track, seed) =>
-  send("set_track", seed === undefined ? { track } : { track, seed });
+/** `seed` / `length` (optional, track "random" only): `seed` reproduces a
+ *  specific generated track, `length` picks short / medium / long. */
+export const setTrack = (track, seed, length) => {
+  const msg = { track };
+  if (seed !== undefined) msg.seed = seed;
+  if (length !== undefined) msg.length = length;
+  send("set_track", msg);
+};
 export const setQubits = (n) => send("qubits", { n });
+/** Pick which training's quantum weights drive the agent ("auto" = per-track). */
+export const setDriver = (driver) => send("set_driver", { driver });
 
 export function trainCmd(action, agent, opts = {}) {
   const msg = { action, agent };

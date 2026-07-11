@@ -1,0 +1,15 @@
+{
+  "agent": "quantum",
+  "track": "universal",
+  "config_hash": "ed96ae593b5c",
+  "episodes": 2500,
+  "date": "DATE",
+  "provenance": "best-snapshot of --track multi (oval+chicane+gp round-robin), seed 42, 2500 episodes, gamma 0.99, epsilon decay 1500",
+  "greedy_eval": {
+    "oval": "laps, best 14.3s",
+    "chicane": "laps, best 14.8s",
+    "gp": "laps, best 25.7s (the gp specialist does 20.4s)",
+    "generated_d0.5": "10/10, best 12.5s median 26.9s",
+    "generated_d0.8": "7/10, best 12.6s median 33.4s"
+  }
+}

@@ -80,6 +80,7 @@ function applyMode(mode) {
     btn.classList.toggle("active", btn.dataset.mode === mode);
   }
   $("#race-controls").hidden = mode !== "race";
+  $("#driver-picker").hidden = mode !== "attract";
   setInputActive(mode === "race");
   attract.setMode(mode);
   renderer.setMode(mode);
@@ -116,6 +117,39 @@ function applyTrack(payload) {
   const value = isRandom ? "random" : payload.name;
   if (sel.value !== value) sel.value = value;
   $("#track-reroll").hidden = !isRandom;
+  const seedInput = $("#track-seed");
+  seedInput.hidden = !isRandom;
+  $("#track-length").hidden = !isRandom;
+  if (isRandom) {
+    // show the active seed as the placeholder (copy it to save the track);
+    // clear any typed value so the next 🎲 press rolls a fresh one
+    const m = payload.name.match(/^random #(\d+)/);
+    if (m) seedInput.placeholder = m[1];
+    seedInput.value = "";
+  }
+}
+
+/** Populate the Watch-mode driver picker from welcome.drivers/driver. */
+function applyDrivers(drivers, current) {
+  const sel = $("#driver-select");
+  const label = (d) => (d === "auto" ? "auto (this track)" : `${d}-trained`);
+  sel.replaceChildren(
+    ...(drivers || ["auto"]).map((d) => {
+      const opt = document.createElement("option");
+      opt.value = d;
+      opt.textContent = label(d);
+      return opt;
+    }),
+  );
+  sel.value = current || "auto";
+}
+
+/** Ask for a generated track: typed seed (empty -> fresh roll) + length. */
+function requestRandomTrack() {
+  const raw = $("#track-seed").value.trim();
+  const seed = /^\d+$/.test(raw) ? parseInt(raw, 10) : undefined;
+  const length = $("#track-length").value;
+  net.setTrack("random", seed, length === "medium" ? undefined : length);
 }
 
 // Circuit-size copy (q6/q8/q10 profiles or a live qubit switch): fix up the
@@ -264,6 +298,7 @@ net.on("welcome", (msg) => {
     applyCircuitSize(msg.circuit_spec);
   }
   applyObsLabels(msg.obs_labels);
+  applyDrivers(msg.drivers, msg.driver);
   if (msg.ui) {
     attract.setIdleSeconds(msg.ui.attract_idle_seconds || 45);
     document.body.classList.toggle("kiosk", Boolean(msg.ui.kiosk));
@@ -358,13 +393,25 @@ for (const btn of document.querySelectorAll(".tab-btn")) {
   btn.addEventListener("click", () => selectTab(btn.dataset.tab));
 }
 
-// Picking "random" (and each reroll click) asks the server for a fresh
-// generated track; the answering track payload carries the seed in its name.
-$("#track-select").addEventListener("change", (ev) => net.setTrack(ev.target.value));
-$("#track-reroll").addEventListener("click", () => net.setTrack("random"));
+// Picking "random" (and each reroll click) asks the server for a generated
+// track — a fresh roll, or a specific one when a seed is typed; the answering
+// track payload carries the seed in its name. Changing length regenerates.
+$("#track-select").addEventListener("change", (ev) => {
+  if (ev.target.value === "random") requestRandomTrack();
+  else net.setTrack(ev.target.value);
+});
+$("#track-reroll").addEventListener("click", requestRandomTrack);
+$("#track-seed").addEventListener("keydown", (ev) => {
+  if (ev.key === "Enter") requestRandomTrack();
+});
+$("#track-length").addEventListener("change", requestRandomTrack);
 
 $("#qubit-select").addEventListener("change", (ev) => {
   net.setQubits(parseInt(ev.target.value, 10)); // server answers with a fresh welcome
+});
+
+$("#driver-select").addEventListener("change", (ev) => {
+  net.setDriver(ev.target.value); // server rebuilds the attract car + re-welcomes
 });
 
 $("#race-start").addEventListener("click", () => {

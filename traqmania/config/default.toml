@@ -60,6 +60,12 @@ episodes = 2000
 epsilon_decay_episodes = 1200
 gamma = 0.99
 
+# combo has a gp-style hairpin plus a chicane: same long-haul recipe as gp.
+[training_presets.combo]
+episodes = 2500
+epsilon_decay_episodes = 1500
+gamma = 0.99
+
 # Warm-start recipe: short fine-tune on top of bundled warm-start weights.
 [training_warm]
 epsilon_start = 0.25

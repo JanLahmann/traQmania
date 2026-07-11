@@ -238,6 +238,7 @@ class DemoSession:
         self._hw_replay: dict | None = None  # {points, lap_time, start_substep}
 
         self.mode = "attract"
+        self.driver = "auto"  # SetDriver override: which training drives the agent
         self.track_name = str(config["track"]["default"])
         self.track_is_random = False
         self._random_seed_rng = np.random.default_rng()  # seeds for seedless rerolls
@@ -277,7 +278,17 @@ class DemoSession:
             "circuit_spec": circuit_spec(self.config),
             "ui": dict(self.config["ui"]),
             "obs_labels": self._obs_labels(),
+            "driver": self.driver,
+            "drivers": self.available_drivers(),
         }
+
+    def available_drivers(self) -> list[str]:
+        """Driver choices for SetDriver: "auto" plus every training whose
+        quantum weights are bundled at the active qubit count."""
+        return ["auto"] + [
+            name for name in ("oval", "chicane", "gp", "universal")
+            if quantum_weights_path(name, self.n_qubits).is_file()
+        ]
 
     def _obs_labels(self) -> list[str]:
         """Display names of the observation features feeding the circuit,
@@ -324,13 +335,15 @@ class DemoSession:
         elif isinstance(msg, protocol.SetMode):
             self._set_mode(msg.mode)
         elif isinstance(msg, protocol.SetTrack):
-            self._set_track(msg.track, msg.seed)
+            self._set_track(msg.track, msg.seed, msg.length)
         elif isinstance(msg, protocol.Train):
             self._handle_train(msg)
         elif isinstance(msg, protocol.Race):
             self._handle_race(msg)
         elif isinstance(msg, protocol.Qubits):
             self._handle_qubits(msg)
+        elif isinstance(msg, protocol.SetDriver):
+            self._handle_driver(msg)
         elif isinstance(msg, protocol.HardwareMsg):
             self._handle_hardware(msg)
         else:
@@ -339,6 +352,9 @@ class DemoSession:
     # -------------------------------------------------------- weight resolution
 
     def _quantum_weights_path(self, suffix: str = "") -> Path:
+        if suffix == "" and self.driver != "auto":
+            # explicit driver pick: that training's weights, whatever the track
+            return quantum_weights_path(self.driver, self.n_qubits)
         if self.track_is_random:  # no per-track specialist exists: fall back
             return random_track_weights(self.n_qubits, suffix)[0]
         return quantum_weights_path(self.track_name, self.n_qubits, suffix)
@@ -427,7 +443,8 @@ class DemoSession:
         else:  # train: cars appear once a train{start} arrives
             self.cars = []
 
-    def _set_track(self, name: str, seed: int | None = None) -> bool:
+    def _set_track(self, name: str, seed: int | None = None,
+                   length: str | None = None) -> bool:
         if self._training_alive():
             self._error("cannot change track while training is running")
             return False
@@ -437,7 +454,7 @@ class DemoSession:
         if self.track_is_random and name == self.track_name:
             pass  # race/train restarts name the current generated track: keep it
         elif name == RANDOM_TRACK:
-            track = self._generate_random_track(seed)
+            track = self._generate_random_track(seed, length)
             if track is None:
                 return False
             self.track = track
@@ -464,9 +481,11 @@ class DemoSession:
             self._enter_hardware()
         return True
 
-    def _generate_random_track(self, seed: int | None):
+    def _generate_random_track(self, seed: int | None, length: str | None = None):
         """Fresh procedural track named ``random #<seed>`` (a seedless request
-        rolls one), or None with an error queued when generation fails."""
+        rolls one; a non-default length is tagged into the name so the label
+        stays reproducible), or None with an error queued when generation
+        fails."""
         try:
             from traqmania.env.trackgen import generate_track
         except ImportError:
@@ -474,13 +493,28 @@ class DemoSession:
             return None
         if seed is None:
             seed = int(self._random_seed_rng.integers(0, 1_000_000))
+        length = length or "medium"
+        suffix = "" if length == "medium" else f" ({length})"
         try:
             return generate_track(seed,
                                   resample_spacing=self.config["track"]["resample_spacing"],
-                                  name=f"random #{seed}")
+                                  name=f"random #{seed}{suffix}",
+                                  length=length)
         except Exception as exc:
             self._error(f"random track generation failed (seed {seed}): {exc}")
             return None
+
+    def _handle_driver(self, msg: protocol.SetDriver) -> None:
+        """Pick which training's quantum weights drive the agent car; rebuilds
+        the attract car immediately, race/evolution pick it up on restart."""
+        if msg.driver not in self.available_drivers():
+            self._error(f"unknown driver '{msg.driver}' at {self.n_qubits} qubits "
+                        f"(available: {', '.join(self.available_drivers())})")
+            return
+        self.driver = msg.driver
+        if self.mode == "attract":
+            self._enter_attract()
+        self._outbox.append(self.welcome_payload())
 
     def _handle_qubits(self, msg: protocol.Qubits) -> None:
         """Live circuit-size switch: overlay the packaged q{n} profile (plain
@@ -504,6 +538,8 @@ class DemoSession:
         self._agent_cache.clear()  # cached qfuncs were built for the old circuit
         self._last_quantum_emit.clear()
         self._abandon_hardware()
+        if self.driver not in self.available_drivers():
+            self.driver = "auto"  # picked training isn't bundled at this size
         self.mode = "attract"
         self._enter_attract()  # graceful car-less fallback when q{n} is untrained
         self._outbox.append(self.welcome_payload())
@@ -520,7 +556,8 @@ class DemoSession:
         self.cars = [human] + ([agent] if agent is not None else [])
 
     def _make_agent_car(self, kind: str) -> _Car:
-        key = (kind, self.track_name)
+        driver = self.driver if kind == "quantum" else ""
+        key = (kind, self.track_name, driver)
         if key not in self._agent_cache:
             if kind == "quantum":
                 self._agent_cache[key] = self._load_quantum_qfunc(self._quantum_weights_path())
@@ -528,7 +565,9 @@ class DemoSession:
                 self._agent_cache[key] = load_agent(kind, self.track_name, config=self.config)
         x, y, theta = self.track.start_pose()
         label = None
-        if self.track_is_random and kind == "quantum":  # honest fallback labeling
+        if kind == "quantum" and self.driver != "auto":  # honest override labeling
+            label = f"driver: {self.driver}-trained"
+        elif self.track_is_random and kind == "quantum":  # honest fallback labeling
             label = f"driver: {random_track_weights(self.n_qubits)[1]}"
         car = _Car(id=kind, kind=kind, state=np.array([x, y, theta, 0.0]),
                    qfunc=self._agent_cache[key], label=label)

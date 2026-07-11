@@ -1,7 +1,10 @@
 // Static explainer content for the Explain panel: sub-tabs with concise,
 // accurate copy about the exhibit. The copy is templated on the circuit spec
 // (welcome.circuit_spec) so q6/q8/q10 profiles state the right sizes; the
-// defaults reproduce the 4-qubit text verbatim.
+// defaults reproduce the 4-qubit text verbatim. The final sub-tab embeds the
+// full repo documentation (docs.js).
+
+import { initDocs } from "./docs.js";
 
 const RAY_WORDS = { 3: "three", 5: "five", 7: "seven", 9: "nine" };
 
@@ -96,6 +99,12 @@ const sections = ({ n_qubits: n = 4, n_layers: layers = 4, n_params: np = {} } =
       identical circuit executes on real quantum hardware in Hardware
       mode.</p>`,
   },
+  {
+    id: "docs",
+    title: "Documentation",
+    html: '<div class="docs-root"></div>',
+    mount: (body) => initDocs(body.querySelector(".docs-root")),
+  },
 ];
 
 /** Build the explain panel (sub-tab nav + sections) inside `root`.
@@ -113,6 +122,7 @@ export function initExplain(root, spec) {
     }
     const section = SECTIONS.find((s) => s.id === id);
     body.innerHTML = `<h2>${section.title}</h2>${section.html}`;
+    if (section.mount) section.mount(body);
   };
 
   for (const s of SECTIONS) {

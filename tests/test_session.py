@@ -121,7 +121,7 @@ def test_welcome_payload(tmp_path):
     welcome = session.welcome_payload()
     assert welcome["type"] == "welcome"
     assert welcome["mode"] == "attract"
-    assert set(welcome["tracks"]) == {"oval", "chicane", "gp"}
+    assert set(welcome["tracks"]) == {"oval", "chicane", "gp", "combo"}
     assert welcome["circuit_spec"]["n_qubits"] == 4
     assert "attract_idle_seconds" in welcome["ui"]
     assert welcome["track"]["name"] == "oval"

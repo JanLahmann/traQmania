@@ -527,7 +527,7 @@ async def verify_random_track(c: Client) -> None:
     cars = await _attract_quantum_cars(c)
     _check_drives(cars, n_rays=3, what="random track")
     labels = {q.get("label") for q in cars}
-    check(labels == {"driver: gp-trained generalist"},
+    check(labels == {"driver: universal"},
           f"attract car carries the honest fallback-driver label ({labels})")
     # the same seed reproduces the same track after switching away and back
     await c.send(type="set_track", track="oval")

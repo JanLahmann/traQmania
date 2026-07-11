@@ -62,6 +62,16 @@ def test_set_track_seed_round_trip():
     assert P.parse_client({"type": "set_track", "track": "gp", "seed": None}).seed is None
 
 
+def test_set_track_length_round_trip():
+    msg = P.SetTrack(track="random", seed=42, length="long")
+    wire = P.serialize(msg)
+    assert wire == {"type": "set_track", "track": "random", "seed": 42, "length": "long"}
+    assert P.parse_client(wire) == msg
+    # length omitted from the wire when None, parses back to None
+    assert "length" not in P.serialize(P.SetTrack(track="random", seed=1))
+    assert P.parse_client({"type": "set_track", "track": "random"}).length is None
+
+
 @pytest.mark.parametrize("data", [
     {"type": "set_track", "track": "random", "seed": "42"},   # wrong type
     {"type": "set_track", "track": "random", "seed": True},   # bool is not an int
@@ -69,6 +79,8 @@ def test_set_track_seed_round_trip():
     {"type": "set_track", "track": "random", "seed": -1},     # out of range
     {"type": "set_track", "seed": 42},                        # track stays required
     {"type": "set_track", "track": "random", "extra": 1},     # unknown field
+    {"type": "set_track", "track": "random", "length": "epic"},  # bad enum
+    {"type": "set_track", "track": "random", "length": 2},    # wrong type
 ], ids=lambda d: repr(d)[:60])
 def test_set_track_seed_rejects_garbage(data):
     with pytest.raises(P.ProtocolError):
@@ -76,6 +88,22 @@ def test_set_track_seed_rejects_garbage(data):
 
 
 # ------------------------------------------------------- random-track session
+
+
+def test_random_track_length_presets(tmp_path):
+    pytest.importorskip("traqmania.env.trackgen")
+    session = make_session(tmp_path)
+    medium = set_random_track(session, seed=7)
+    assert medium["name"] == "random #7"
+
+    session.handle_message(P.SetTrack(track="random", seed=7, length="long"))
+    msgs = session.drain_outbox()
+    assert not by_type(msgs, "error")
+    long_ = by_type(msgs, "track")[0]["track"]
+    # non-default lengths are tagged into the name so the label reproduces
+    # the track, and the same seed really is a different (bigger) track
+    assert long_["name"] == "random #7 (long)"
+    assert len(long_["centerline"]) > len(medium["centerline"])
 
 
 def test_random_track_attract_drives_with_honest_fallback(tmp_path):
@@ -86,14 +114,17 @@ def test_random_track_attract_drives_with_honest_fallback(tmp_path):
     assert len(payload["centerline"]) >= 8
     assert session.welcome_payload()["track"]["name"] == "random #7"
 
-    # no quantum_universal.npz is bundled -> the chain picks the gp specialist
+    # the bundled multi-track universal weights drive generated tracks;
+    # without them the chain falls back to the gp specialist
     path, label = random_track_weights(session.n_qubits)
-    assert (path.name, label) == ("quantum_gp.npz", "gp-trained generalist")
+    assert (path.name, label) == ("quantum_universal.npz", "universal")
+    path6, label6 = random_track_weights(6)  # no q6 universal is bundled
+    assert (path6.name, label6) == ("quantum_gp_q6.npz", "gp-trained generalist")
     assert session._quantum_weights_path() == path
     assert session.mode == "attract"
     assert [c.kind for c in session.cars] == ["quantum"]
     assert np.array_equal(session.cars[0].qfunc.get_params(), np.load(path)["params"])
-    assert session.cars[0].label == "driver: gp-trained generalist"
+    assert session.cars[0].label == "driver: universal"
 
     for _ in range(120):  # 2 s of sim time = 20 agent decisions
         session.tick()
@@ -103,7 +134,7 @@ def test_random_track_attract_drives_with_honest_fallback(tmp_path):
     assert states
     P.parse_server(states[-1])  # validates the payload shape on the wire
     cars = [c for m in states for c in m["cars"] if c["id"] == "quantum"]
-    assert all(c["label"] == "driver: gp-trained generalist" for c in cars)
+    assert all(c["label"] == "driver: universal" for c in cars)
     xs, ys = [c["x"] for c in cars], [c["y"] for c in cars]
     assert (max(xs) - min(xs)) + (max(ys) - min(ys)) > 0.5  # the fallback drives
 

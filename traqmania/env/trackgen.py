@@ -40,6 +40,16 @@ MAX_ATTEMPTS = 50
 
 _N_RAW_POINTS = 512  # dense polar samples handed to Track (it resamples anyway)
 
+# ``length`` presets: (base radius lo, base radius hi, perimeter cap).  The
+# cap keeps laps inside the 60 s RL episode budget ([reward].max_decisions)
+# for short/medium; "long" tracks trade that away — laps can run 60-90 s, fine
+# for live driving (attract/race have no decision cap) but not for training.
+LENGTH_PRESETS = {
+    "short": (18.0, 26.0, 420.0),
+    "medium": (24.0, 34.0, 650.0),
+    "long": (36.0, 50.0, 1300.0),
+}
+
 
 def _target_min_radius(difficulty: float) -> float:
     """Minimum-corner-radius target: 12 units at difficulty 0 tightening to
@@ -82,7 +92,7 @@ def _min_corner_radius(pts: np.ndarray) -> float:
 
 
 def _sample_shape(
-    rng: np.random.Generator, difficulty: float,
+    rng: np.random.Generator, difficulty: float, length: str = "medium",
 ) -> tuple[np.ndarray | None, float]:
     """One random (centerline points, half_width) candidate; points are None
     when the candidate pinched into itself and the caller should retry.
@@ -97,7 +107,8 @@ def _sample_shape(
     target = _target_min_radius(difficulty)
     half_width = max(3.5, 7.0 - 3.5 * difficulty)  # wide -> narrow (gp is 6.0)
 
-    base_radius = rng.uniform(24.0, 34.0)
+    base_lo, base_hi, perimeter_cap = LENGTH_PRESETS[length]
+    base_radius = rng.uniform(base_lo, base_hi)
     theta = np.arange(_N_RAW_POINTS) * (2.0 * np.pi / _N_RAW_POINTS)
 
     # gentle global harmonics: overall irregularity, not the corners
@@ -153,10 +164,9 @@ def _sample_shape(
     if measured * scale > 1.4 * target:
         return None, half_width
     pts = pts * scale
-    # keep laps finishable: the episode cap is 60 s (600 decisions at 10 Hz),
-    # so a lap must fit comfortably inside it at typical racing speeds
+    # keep laps inside the length preset's budget (see LENGTH_PRESETS)
     perimeter = float(np.linalg.norm(np.roll(pts, -1, axis=0) - pts, axis=1).sum())
-    if perimeter > 650.0:
+    if perimeter > perimeter_cap:
         return None, half_width
     # a dent slot narrower than the track surface would fold onto itself
     min_clear = 2.35 * half_width
@@ -166,22 +176,30 @@ def _sample_shape(
 
 
 def generate_track(seed: int, resample_spacing: float = 1.5, difficulty: float = 0.5,
-                   name: str | None = None) -> Track:
-    """Generate a random valid Track, deterministic per ``(seed, difficulty)``.
+                   name: str | None = None, length: str = "medium") -> Track:
+    """Generate a random valid Track, deterministic per ``(seed, difficulty,
+    length)``.
 
     ``difficulty`` is clipped to [0, 1]: 0 gives wide tracks with gentle
     corners, 1 gives narrow tracks slightly tighter than the bundled gp.
-    The returned track is named ``random-<seed>`` unless ``name`` is given,
-    uses the bundled tracks' checkpoint convention, and carries the number of
-    generation attempts in ``track.generation_attempts``.  Raises
-    ``ValueError`` if no candidate passes validation in ``MAX_ATTEMPTS``.
+    ``length`` is one of ``LENGTH_PRESETS`` (short / medium / long); "long"
+    laps can exceed the 60 s RL episode cap, so use them for live driving,
+    not training.  The returned track is named ``random-<seed>`` unless
+    ``name`` is given, uses the bundled tracks' checkpoint convention, and
+    carries the number of generation attempts in
+    ``track.generation_attempts``.  Raises ``ValueError`` for an unknown
+    ``length`` or if no candidate passes validation in ``MAX_ATTEMPTS``.
     """
+    if length not in LENGTH_PRESETS:
+        raise ValueError(
+            f"unknown track length '{length}' (expected one of {sorted(LENGTH_PRESETS)})"
+        )
     difficulty = float(np.clip(difficulty, 0.0, 1.0))
     track_name = f"random-{seed}" if name is None else str(name)
     rng = np.random.default_rng(seed)
     last_error: ValueError | None = None
     for attempt in range(1, MAX_ATTEMPTS + 1):
-        pts, half_width = _sample_shape(rng, difficulty)
+        pts, half_width = _sample_shape(rng, difficulty, length)
         if pts is None:
             last_error = ValueError("track surface would pinch into itself")
             continue
@@ -195,6 +213,6 @@ def generate_track(seed: int, resample_spacing: float = 1.5, difficulty: float =
         track.generation_attempts = attempt
         return track
     raise ValueError(
-        f"generate_track(seed={seed}, difficulty={difficulty}): no valid track "
-        f"after {MAX_ATTEMPTS} attempts (last error: {last_error})"
+        f"generate_track(seed={seed}, difficulty={difficulty}, length={length}): "
+        f"no valid track after {MAX_ATTEMPTS} attempts (last error: {last_error})"
     )

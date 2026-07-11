@@ -210,6 +210,22 @@ and no per-variant hyperparameter search; a plausible mundane explanation
 better than ray geometry) is untested. Notebook 06 has the learning curves
 and the full comparison.
 
+### One driver, every track (cross-track generalization)
+
+Because the observation is egocentric (lidar rays + speed, no absolute
+position), a trained policy is not tied to its training track. Measured
+zero-shot (greedy, no fine-tuning): the gp-trained 4-qubit specialist laps
+oval (15.8 s), chicane (16.1 s) and 10/10 unseen procedurally generated
+tracks at difficulty 0.5 (best 11.3 s, median 25.9 s); oval/chicane
+specialists lap each other's tracks but fail gp (0/6). Training one circuit
+on all three tracks round-robin (`--track multi`, 2500 episodes) produced
+the bundled **`quantum_universal.npz`** (seed 42): oval 14.3 s, chicane
+14.8 s, gp 25.7 s (vs the specialist's 20.4 s), 10/10 generated tracks at
+difficulty 0.5, 7/10 at 0.8. Seed-honesty: seeds 0 and 1 of the same recipe
+failed to generalize to gp (0/6); training purely on pools of generated
+tracks (`--track random`) was strictly worse on the bundled tracks. All
+learning curves are in `data/histories/` (`multi_*`, `random_*`).
+
 ## Honest claims
 
 Being honest matters more than being exciting:

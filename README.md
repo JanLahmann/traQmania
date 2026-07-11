@@ -83,6 +83,15 @@ the matched MLP baselines (92–124 params: 13.5–14.1 s rays-only vs 14.1–14
 with features, ~0.01 ms/decision) — yet the MLP still matches or beats every
 quantum lap time, so this stays parity, not advantage.
 
+**One driver, every track**: training a single 4-qubit circuit on all three
+tracks round-robin (2500 episodes, seed 42) yields a bundled **universal**
+driver that laps oval (14.3 s), chicane (14.8 s), gp (25.7 s — the gp
+specialist does 20.4 s) *and* 10/10 unseen generated tracks at medium
+difficulty (best 12.5 s). Specialists stay faster at home; the egocentric
+lidar-and-speed observation is what makes the transfer work. Seed-honesty:
+2 of 3 seeds failed to generalize to gp — the bundled weights are the seed
+that did.
+
 Why we train on a simulator and run inference on hardware: one double-DQN update is
 **~3.4 ms** with the numpy statevector + adjoint path vs **~20.5 s** with
 parameter-shift gradients through `EstimatorQNN` — a ~6,000× gap, before any queue
@@ -92,7 +101,14 @@ noise (`aer_noisy`).
 ## Modes
 
 - **Watch** (attract): the trained 4-qubit agent drives; live ⟨Z⟩ gauges, Q-values,
-  and the circuit diagram update as it decides.
+  and the circuit diagram update as it decides. A driver picker swaps in any
+  bundled training — watch the gp-trained specialist lap the oval zero-shot, or
+  the **universal** driver (trained on all three tracks at once) take on any of
+  them.
+- **Surprise tracks**: pick 🎲 random in the track menu for a procedurally
+  generated track with real hairpins and chicanes — fresh every roll, or type a
+  seed to reload a favourite, with short/medium/long size presets. The universal
+  driver laps unseen generated tracks zero-shot (10/10 at medium difficulty).
 - **Train**: watch quantum and classical agents learn side-by-side (warm-start mode
   reaches a first clean lap in seconds).
 - **Race**: arrow keys / WASD or a gamepad (analog steering, trigger

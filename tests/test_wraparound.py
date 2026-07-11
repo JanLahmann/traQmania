@@ -5,7 +5,7 @@ import pytest
 
 from traqmania.env.track import Track
 
-TRACK_NAMES = ["oval", "chicane", "gp"]
+TRACK_NAMES = ["oval", "chicane", "gp", "combo"]
 
 
 @pytest.fixture(params=TRACK_NAMES)
