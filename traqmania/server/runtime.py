@@ -61,6 +61,25 @@ def load_agent(kind: str, track_name: str, warm: bool = False, config: dict | No
     return qfunc
 
 
+def weights_observation(path: Path) -> dict | None:
+    """The ``[observation]`` settings a weights file was trained with, from its
+    ``.meta.json`` sidecar (``ray_angles_deg``/``features``/``lookahead_m``),
+    or None when the sidecar is missing or records no observation.
+
+    Loaders overlay this on the profile's observation so a driver trained on
+    engineered features is fed the scalars it actually learned from — the
+    circuit encodes one feature per qubit, so driving it under a different
+    ray layout silently scrambles its inputs.
+    """
+    meta_path = path.with_suffix("").with_suffix(".meta.json")
+    try:
+        with meta_path.open("r", encoding="utf-8") as f:
+            obs = json.load(f).get("observation")
+    except (OSError, ValueError):
+        return None
+    return dict(obs) if isinstance(obs, dict) else None
+
+
 def _weights_label(path: Path, fallback: str) -> str:
     """Evolution-car label from a weights file's .meta.json ('ep N'), or ``fallback``."""
     meta_path = path.with_suffix("").with_suffix(".meta.json")

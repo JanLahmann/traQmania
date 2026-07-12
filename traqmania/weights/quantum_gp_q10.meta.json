@@ -1,0 +1,12 @@
+{
+  "agent": "quantum",
+  "track": "gp",
+  "config_hash": "3bfd52418c09",
+  "episodes": 3000,
+  "observation": {
+    "ray_angles_deg": [-60.0, -30.0, 0.0, 30.0, 60.0],
+    "features": ["rays", "speed", "curvature_ahead", "lateral_offset", "heading_error", "corner_speed_ratio"]
+  },
+  "provenance": "campaign-D recipe transplant (3000 episodes, epsilon_decay 2000, gamma 0.99, seed 42); 36-episode reliability eval: laps in 25/36 episodes, best 20.0 s, mean 22.3 s (bundled 4q gp: 29/36, best 20.4 s, mean 23.9 s)",
+  "date": "2026-07-12"
+}

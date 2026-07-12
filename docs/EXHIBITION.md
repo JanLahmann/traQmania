@@ -74,15 +74,17 @@ traqmania/config/exhibition.toml`. Run the browser fullscreen, e.g.
 
 What visibly changes: the car senses with **5 lidar rays** instead of 3, the
 circuit diagram shows **6 qubits**, and the parameter count reads **80**
-(actions stay 4). Bundled 6-qubit weights exist for the **oval** only, so
-attract, race-vs-quantum, and hardware laps work there; **Evolution** and the
-**MLP opponent** are 4-qubit-only, and the UI reports a clear error if
-selected rather than crashing. Live training works on any track, and the
-oval now ships a 6-qubit warm-start checkpoint and evolution stages too.
-Hardware mode automatically picks a big-enough fake backend (the 7-qubit
-`fake_lagos` instead of the 5-qubit devices). 8- and 10-qubit oval/chicane
-weights ship as well — the q10 oval driver's 12.0 s is the fastest quantum
-lap in the demo (at ~5–9 ms per decision instead of <1 ms).
+(actions stay 4). Bundled 6-qubit weights cover **oval and chicane**;
+**Evolution** (beyond the oval) and the **MLP opponent** are 4-qubit-only,
+and the UI reports a clear error if selected rather than crashing. Live
+training works on any track, and the oval ships a 6-qubit warm-start
+checkpoint and evolution stages too. Hardware mode automatically picks a
+big-enough fake backend (the 7-qubit `fake_lagos` instead of the 5-qubit
+devices). 8- and 10-qubit oval/chicane weights ship as well — the q10 oval
+driver's 12.0 s is the fastest quantum lap in the demo (at ~5–9 ms per
+decision instead of <1 ms) — and at 10 qubits even **gp** has a bundled
+driver: it senses 5 rays plus four engineered track features (the gauge
+labels change accordingly when it drives), and laps at 20–22 s.
 
 Talking point — the honest scaling result: *"Same circuit family from 4 to
 10 qubits: sample efficiency stays flat — a first clean lap always lands

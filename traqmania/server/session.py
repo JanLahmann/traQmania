@@ -33,7 +33,7 @@ from traqmania.agents.quantum.qdqn import QuantumQFunction
 from traqmania.agents.training import DQNTrainer
 from traqmania.config import load_config
 from traqmania.env.car import CarPhysics
-from traqmania.env.racing_env import RacingEnv
+from traqmania.env.racing_env import CarObserver, RacingEnv
 from traqmania.server import protocol
 from traqmania.server.runtime import (
     LEADERBOARD_MAX_ENTRIES,
@@ -50,6 +50,7 @@ from traqmania.server.runtime import (
     save_ghost,
     save_leaderboard,
     track_payload,
+    weights_observation,
 )
 
 HUMAN_RESPAWN_DELAY_S = 1.0
@@ -271,6 +272,10 @@ class DemoSession:
         self.car_physics = CarPhysics(physics)
 
         obs_cfg = config["observation"]
+        # the profile's own observation — the baseline that _sync_obs_to_weights
+        # reverts to when the active driver's weights record no observation
+        self._profile_obs = {k: (list(v) if isinstance(v, list) else v)
+                             for k, v in obs_cfg.items()}
         self.ray_angles = np.deg2rad(np.asarray(obs_cfg["ray_angles_deg"], dtype=np.float64))
         self.ray_max_dist = float(obs_cfg["ray_max_dist"])
         self.n_qubits = int(config.get("circuit", {}).get("n_qubits", 4))
@@ -308,15 +313,55 @@ class DemoSession:
         )
 
     def _obs_labels(self) -> list[str]:
-        """Display names of the observation features feeding the circuit,
-        from ``env.feature_names`` when the env provides it (older envs get
-        the default rays-then-speed labels)."""
-        env = RacingEnv(self.track, self.config, n_envs=1, seed=0)
-        names = getattr(env, "feature_names", None)
-        if names is None:
-            angles = self.config["observation"]["ray_angles_deg"]
-            names = [f"ray {a:+.0f}°" if a else "ray 0°" for a in angles] + ["speed"]
-        return [str(name) for name in names]
+        """Display names of the observation features feeding the circuit."""
+        return [str(name) for name in self.observer.feature_names]
+
+    @property
+    def observer(self) -> CarObserver:
+        """Feature pipeline for the live cars — the exact one training used.
+        Rebuilt whenever the track or the [observation] config changed
+        (track/qubit switches, driver-observation adoption)."""
+        obs_cfg = self.config["observation"]
+        key = (id(self.track),
+               tuple(obs_cfg.get("features", ["rays", "speed"])),
+               tuple(obs_cfg["ray_angles_deg"]),
+               float(obs_cfg["ray_max_dist"]),
+               float(obs_cfg.get("lookahead_m", 15.0)))
+        if getattr(self, "_observer_key", None) != key:
+            self._observer = CarObserver(self.track, self.config, car=self.car_physics)
+            self._observer_key = key
+        return self._observer
+
+    def _set_observation(self, obs_cfg: dict) -> None:
+        self.config["observation"] = dict(obs_cfg)
+        self.ray_angles = np.deg2rad(np.asarray(obs_cfg["ray_angles_deg"], dtype=np.float64))
+        self.ray_max_dist = float(obs_cfg["ray_max_dist"])
+
+    def _sync_obs_to_weights(self, use_weights: bool = True) -> None:
+        """Adopt the [observation] the active quantum driver was trained with
+        (recorded in its weights .meta.json), else the profile's own.
+
+        The circuit encodes one feature per qubit, so driving feature-observation
+        weights under the profile's ray layout would scramble their inputs.
+        Training modes pass ``use_weights=False``: fresh training always uses
+        the profile observation."""
+        meta_obs = None
+        path = None
+        if use_weights and self.driver not in ("hero", "pro"):
+            path = self._quantum_weights_path()
+            if path.is_file():
+                meta_obs = weights_observation(path)
+        target = {**self._profile_obs, **(meta_obs or {})}
+        if meta_obs is not None:
+            try:  # a bad sidecar must not crash the session: fall back to profile
+                CarObserver(self.track, {**self.config, "observation": dict(target)},
+                            car=self.car_physics)
+            except ValueError as exc:
+                self._error(f"ignoring recorded observation in {path.name}: {exc}")
+                target = dict(self._profile_obs)
+        if target != self.config["observation"]:
+            self._set_observation(target)
+            self._outbox.append(self.welcome_payload())
 
     def drain_outbox(self) -> list[dict]:
         out = self._outbox
@@ -400,8 +445,9 @@ class DemoSession:
                     f"no training is bundled at {self.n_qubits} qubits yet")
             return (f"missing weights '{path.name}' ({hint}) — switch track or "
                     "qubit count, or train one in the Train tab")
-        if self.n_qubits != 4:  # bundled mlp weights expect the 4-feature observation
-            return f"bundled mlp weights use 4 features, config has {self.n_qubits}"
+        if self.observer.n_features != 4:  # bundled mlp weights expect rays+speed = 4
+            return ("bundled mlp weights use the default 4-feature observation, "
+                    f"config has {self.observer.n_features}")
         path = WEIGHTS_DIR / f"mlp_{self.track_name}.npz"
         return None if path.is_file() else f"missing weights '{path.name}'"
 
@@ -631,6 +677,7 @@ class DemoSession:
         self._outbox.append(self.welcome_payload())
 
     def _enter_attract(self) -> None:
+        self._sync_obs_to_weights()
         if self.driver in ("hero", "pro"):
             self.cars = [self._make_hero_car(self.driver)]
             return
@@ -668,6 +715,7 @@ class DemoSession:
         return car
 
     def _enter_race(self, opponent: str) -> None:
+        self._sync_obs_to_weights(use_weights=opponent == "quantum")
         x, y, theta = self.track.start_pose()
         human = _Car(id="human", kind="human", state=np.array([x, y, theta, 0.0]))
         self._respawn(human)
@@ -700,6 +748,7 @@ class DemoSession:
             self._error(f"cannot enter evolution mode: {reason}")
             self.cars = []
             return
+        self._sync_obs_to_weights()
         x, y, theta = self.track.start_pose()
         cars = []
         for i, (label, path) in enumerate(self._evolution_stage_specs(), start=1):
@@ -716,6 +765,7 @@ class DemoSession:
 
     def _enter_hardware(self) -> None:
         """Current track with one idle fastsim quantum car (drives during replay)."""
+        self._sync_obs_to_weights()
         self._hw_replay = None
         car = self._try_make_agent_car("quantum")
         self.cars = [car] if car is not None else []
@@ -750,6 +800,7 @@ class DemoSession:
         if msg.track is not None and not self._set_track(msg.track):
             return
         self.mode = "train"
+        self._sync_obs_to_weights(use_weights=False)  # fresh training: profile obs
         self.cars = []
         self.jobs = {}
         agents = ("quantum", "mlp") if msg.agent == "both" else (msg.agent,)
@@ -1061,14 +1112,13 @@ class DemoSession:
             self._emit_state()
 
     def _car_obs(self, car: _Car) -> np.ndarray:
-        """(1, F) observation matching RacingEnv._obs for a single car."""
-        x, y, theta, v = car.state
-        origins = np.tile(car.state[:2], (len(self.ray_angles), 1))
-        dist = self.track.raycast(origins, theta + self.ray_angles, self.ray_max_dist)
-        rays = np.clip(dist / self.ray_max_dist, 0.0, 1.0)
-        speed = np.clip(v / self.car_physics.v_max, 0.0, 1.0)
-        car.rays = [float(r) for r in rays]
-        return np.concatenate([rays, [speed]])[None, :]
+        """(1, F) observation for a single live car via the shared
+        :class:`CarObserver` — the same pipeline training used, engineered
+        feature kinds included."""
+        obs = self.observer.observe(car.state[None, :])
+        rays = self.observer.rays_slice
+        car.rays = [float(r) for r in obs[0, rays]] if rays is not None else []
+        return obs
 
     def _decide(self) -> None:
         """10 Hz agent decisions: greedy action per agent car, quantum introspection."""

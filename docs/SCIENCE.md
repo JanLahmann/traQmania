@@ -219,11 +219,14 @@ still never laps greedily (fresh slow-decay and warm-from-chicane both
 fail at q6/q10; cross-track warm starts have never worked in this
 project). Net verdict, strengthened: the braking problem was a
 recipe/exploration problem, not a capacity one — with the right decay,
-capacity is fine all the way to 10 qubits. The bundle is nevertheless
-unchanged: the q8/q10 winners need the engineered-feature observation
-while weight resolution keys on qubit count alone (shipping them would
-break the plain-rays oval/chicane weights at the same size), and no q6
-candidate clears the reliability-plus-pace bar.
+capacity is fine all the way to 10 qubits. The q10 gp winner ships as
+`quantum_gp_q10.npz`: weight resolution is observation-aware — each weights
+file's `.meta.json` records the `[observation]` it was trained with
+(`runtime.weights_observation`), and the server overlays it on the profile
+when that driver is active, so a feature-observation driver coexists with
+the plain-rays oval/chicane weights at the same qubit count. The q6/q8 gp
+candidates stay unbundled (they lap, but ~17 s off the pace), as does
+every combo candidate above 4 qubits.
 
 ### Observation engineering
 

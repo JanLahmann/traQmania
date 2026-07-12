@@ -101,11 +101,20 @@ def save_weights(qfunc, agent: str, track_name: str, config: dict, episodes: int
     qtag = "" if n_qubits == 4 else f"_q{n_qubits}"
     npz_path = out_dir / f"{agent}_{track_name}{qtag}.npz"
     np.savez(npz_path, params=qfunc.get_params())
+    obs_cfg = config["observation"]
     meta = {
         "agent": agent,
         "track": track_name,
         "config_hash": config_hash(config),
         "episodes": episodes,
+        # what the driver was trained to see; loaders (see
+        # runtime.weights_observation) overlay this on the profile obs
+        "observation": {
+            "ray_angles_deg": [float(a) for a in obs_cfg["ray_angles_deg"]],
+            "features": [str(k) for k in obs_cfg.get("features", ["rays", "speed"])],
+            **({"lookahead_m": float(obs_cfg["lookahead_m"])}
+               if "lookahead_m" in obs_cfg else {}),
+        },
         "date": "DATE",
     }
     meta_path = npz_path.with_suffix("").with_suffix(".meta.json")
