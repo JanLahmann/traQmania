@@ -41,6 +41,12 @@ resample_spacing = 1.5
 n_qubits = 4
 n_layers = 4              # data re-uploading blocks
 seed = 7
+# n_actions = 6           # scaled action readout: Q_a = <Z_a> on the first
+#                         # n_actions qubits (4 | 6 | 8; default min(4, n_qubits)).
+#                         # 6 adds trail braking, 8 adds half-steer — see
+#                         # traqmania/agents/base.py. Weights record their action
+#                         # count in the .meta.json sidecar; the server adopts it
+#                         # per driver, so leave this unset in profiles.
 
 [training]
 algo = "double_dqn"
@@ -81,6 +87,21 @@ epsilon_start = 0.25
 epsilon_end = 0.05
 epsilon_decay_episodes = 40
 episodes = 150
+
+# Pace fine-tune (train_headless --pace, meant with --init on a lapping
+# snapshot): low-epsilon phase 2 whose reward adds a per-decision time
+# penalty, so the objective becomes "lap FAST", not just "lap". At
+# time_penalty 0.5 a lap's net value rises ~5 per second of lap time saved
+# (progress reward alone pays the same total per lap however slow it was —
+# discounting is otherwise the only pace pressure). Standing still nets
+# negative reward below ~5 m/s, which is fine for an already-lapping policy.
+[training_pace]
+time_penalty = 0.5        # moved to [reward] time_penalty by train_headless
+epsilon_start = 0.15
+epsilon_end = 0.02
+epsilon_decay_episodes = 400
+episodes = 600
+gamma = 0.99
 
 # gp needs a longer warm fine-tune (merged on top of [training_warm]).
 # HONEST v2-physics caveat: gp warm live-training is a coin flip. This

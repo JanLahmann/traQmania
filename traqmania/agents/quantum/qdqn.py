@@ -7,9 +7,11 @@ Flat parameter vector layout (total P = L*n + L*n*2 + 2*A, A = min(4, n)):
     w     (A,)       output weights, init 1.0
     b     (A,)       output biases, init 0.0
 
-Q_a = w[a] * <Z_a> + b[a], read out on the first A qubits (there are always 4
-actions; extra qubits at n > 4 only widen the feature register).
-numpy/stdlib only — no qiskit imports in this module.
+Q_a = w[a] * <Z_a> + b[a], read out on the first A qubits.  A defaults to
+min(4, n) — extra qubits then only widen the feature register — but
+``[circuit] n_actions`` can raise it (6/8-action sets, see
+``traqmania.agents.base.action_set``) so bigger registers also widen the
+action repertoire.  numpy/stdlib only — no qiskit imports in this module.
 """
 
 from __future__ import annotations
@@ -32,7 +34,13 @@ class QuantumQFunction:
         self.seed = int(seed)
 
         self.n_features = self.n_qubits
-        self.n_actions = min(4, self.n_qubits)  # Z_a readout on the first 4 qubits
+        # Z_a readout on the first n_actions qubits (default: the first 4)
+        self.n_actions = int(cfg.get("n_actions", min(4, self.n_qubits)))
+        if self.n_actions > self.n_qubits:
+            raise ValueError(
+                f"[circuit] n_actions = {self.n_actions} needs at least as many "
+                f"qubits, got n_qubits = {self.n_qubits}"
+            )
 
         self._sim = FastStatevectorSim(n_qubits=self.n_qubits, n_layers=self.n_layers)
 

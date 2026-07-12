@@ -71,7 +71,13 @@ class QiskitQFunction:
         self.shots = int(shots)
 
         self.n_features = self.n_qubits
-        self.n_actions = min(4, self.n_qubits)  # Z_a readout on the first 4 qubits
+        # Z_a readout on the first n_actions qubits (default: the first 4)
+        self.n_actions = int(cfg.get("n_actions", min(4, self.n_qubits)))
+        if self.n_actions > self.n_qubits:
+            raise ValueError(
+                f"[circuit] n_actions = {self.n_actions} needs at least as many "
+                f"qubits, got n_qubits = {self.n_qubits}"
+            )
 
         # Same initialization (and rng stream) as the numpy fast path.
         rng = np.random.default_rng(self.seed)

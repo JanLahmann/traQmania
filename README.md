@@ -102,6 +102,18 @@ candidates stay unbundled (they lap, but ~40 s slow; see docs/SCIENCE.md).
 combo still ships 4-qubit only. `python -m traqmania.records` evaluates
 every bundled driver on every track into `data/records.json` for comparison.
 
+Why don't more qubits buy faster laps? The analysis (docs/SCIENCE.md,
+"Making qubits matter") found the bottlenecks outside the circuit, and the
+stack now addresses each: a **qubit-scaled action readout** (6/8 actions —
+trail braking, half-steer — read off the first *k* qubits, `--actions` in
+`train_headless`; the 4-action default stays bit-identical), **multi-horizon
+curvature sensing** (`"curvature_ahead:30"`-style features — braking from
+v_max needs ~17 m, more than the old 15 m lookahead could see), a
+**pace fine-tune phase** (`--pace`: per-decision time penalty at low
+epsilon, so the objective becomes lap time), and **reliability-first
+snapshot selection** (12-episode mean-lap ranking instead of a 4-episode
+lucky-lap check).
+
 **One driver, every track**: the bundled **universal** driver — a single
 4-qubit circuit trained on all four tracks round-robin (3000 episodes),
 warm-started from its physics-v1 predecessor — laps oval (13.0 s), chicane

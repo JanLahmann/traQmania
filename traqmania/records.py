@@ -32,7 +32,12 @@ from traqmania.agents.classical import MLPQFunction
 from traqmania.config import load_config
 from traqmania.env.racing_env import RacingEnv
 from traqmania.env.track import Track
-from traqmania.server.runtime import WEIGHTS_DIR, available_tracks, weights_observation
+from traqmania.server.runtime import (
+    WEIGHTS_DIR,
+    available_tracks,
+    weights_actions,
+    weights_observation,
+)
 
 RECORDS_PATH = Path(__file__).resolve().parent.parent / "data" / "records.json"
 QUBIT_COUNTS = (4, 6, 8, 10)
@@ -54,12 +59,17 @@ class Driver:
 
 
 def _quantum_config(n_qubits: int, path: Path) -> dict:
-    """Packaged q<n> profile with the weights' recorded observation overlaid."""
+    """Packaged q<n> profile with the weights' recorded observation and
+    action-set size overlaid."""
     config = load_config() if n_qubits == 4 else load_config(f"q{n_qubits}")
     obs = weights_observation(path)
-    if obs:
+    n_actions = weights_actions(path)
+    if obs or n_actions:
         config = copy.deepcopy(config)
-        config["observation"].update(obs)
+        if obs:
+            config["observation"].update(obs)
+        if n_actions:
+            config["circuit"]["n_actions"] = n_actions
     return config
 
 
@@ -92,8 +102,9 @@ def _load_qfunc(driver: Driver):
         qfunc = QuantumQFunction(driver.config["circuit"])
     else:
         n_features = 4  # bundled mlp baselines use the default rays+speed obs
-        hidden = (params.size - N_ACTIONS) // (n_features + 1 + N_ACTIONS)
-        qfunc = MLPQFunction(n_features=n_features, hidden=hidden, n_actions=N_ACTIONS)
+        n_actions = weights_actions(driver.path) or N_ACTIONS
+        hidden = (params.size - n_actions) // (n_features + 1 + n_actions)
+        qfunc = MLPQFunction(n_features=n_features, hidden=hidden, n_actions=n_actions)
     qfunc.set_params(params)
     return qfunc
 

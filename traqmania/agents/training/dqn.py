@@ -105,7 +105,11 @@ class DQNTrainer:
         self.env_factory = env_factory
         self.stop_event = stop_event
         self.eval_every = int(training_cfg.get("eval_every", 50))
-        self.eval_episodes = int(training_cfg.get("eval_episodes", 4))
+        # Total greedy episodes per snapshot eval (rounded up to full batches
+        # of the eval env). 12 instead of the old 4: a 4-episode eval once
+        # crowned an 18.1 s gp headline that a 36-episode recheck put at 5/36
+        # lapped episodes — reliability needs a sample, not a lucky roll.
+        self.eval_episodes = int(training_cfg.get("eval_episodes", 12))
 
         self.gamma = training_cfg["gamma"]
         self.batch_size = training_cfg["batch_size"]
@@ -158,62 +162,81 @@ class DQNTrainer:
             self.target_params = self.qfunc.get_params()
         return float(np.mean(td**2))
 
-    def _greedy_eval(self, env, max_steps: int = 5000) -> tuple[int, float, float]:
-        """Greedy (epsilon = 0) eval: one full episode per env, in parallel.
+    def _greedy_eval_round(self, env, max_steps: int = 5000):
+        """One greedy (epsilon = 0) round: one full episode per env, in parallel.
 
         Counts laps INCREMENTALLY while each env's first episode is still
         running and stops once every env has finished one episode (crash or
         step cap) — counting laps only at ``done`` undercounts exactly the
         good policies, whose envs lap on without finishing, while crashing
-        envs "finish" fast.  Returns (laps_completed, best_lap_seconds,
-        mean_return); best_lap is +inf when no lap finished.  Expects the
-        racing-env info dict (``lap``, ``last_lap_time``).
+        envs "finish" fast.  Returns (lapped_episodes, lap_times, episode_returns)
+        for the round.  Expects the racing-env info dict (``lap``,
+        ``last_lap_time``).
         """
         obs = env.reset()
         n_envs = obs.shape[0]
         done_seen = np.zeros(n_envs, dtype=bool)
         prev_lap = np.zeros(n_envs, dtype=np.int64)
-        laps = 0
-        best_lap = float("inf")
+        lapped = np.zeros(n_envs, dtype=bool)
+        lap_times: list[float] = []
         return_acc = np.zeros(n_envs)
         episode_returns: list[float] = []
         for _ in range(max_steps):
             actions = np.argmax(self.qfunc.q_values(obs), axis=1)
             obs, reward, done, info = env.step(actions)
+            done = np.asarray(done, dtype=bool)
             active = ~done_seen
             return_acc[active] += np.asarray(reward)[active]
             if isinstance(info, dict) and "lap" in info:
                 lap = np.asarray(info["lap"], dtype=np.int64)
-                laps += int(np.sum(np.maximum(lap - prev_lap, 0)[active]))
-                prev_lap = np.where(np.asarray(done, dtype=bool), 0, lap)  # env auto-resets
-                lap_times = np.asarray(info.get("last_lap_time", np.nan), dtype=np.float64)
-                if np.any(active & ~np.isnan(lap_times)):
-                    best_lap = min(best_lap, float(np.nanmin(lap_times[active])))
-            for i in np.flatnonzero(np.asarray(done, dtype=bool) & active):
+                event = (lap > prev_lap) & active  # a lap finished this step
+                lapped |= event
+                lt = np.asarray(info.get("last_lap_time", np.nan), dtype=np.float64)
+                lap_times.extend(float(t) for t in lt[event & ~np.isnan(lt)])
+                prev_lap = np.where(done, 0, lap)  # env auto-resets on done
+            for i in np.flatnonzero(done & active):
                 episode_returns.append(float(return_acc[i]))
-            done_seen |= np.asarray(done, dtype=bool)
+            done_seen |= done
             if done_seen.all():
                 break
-        mean_return = float(np.mean(episode_returns)) if episode_returns else float("-inf")
-        return laps, best_lap, mean_return
+        return int(lapped.sum()), lap_times, episode_returns
 
     def _eval_snapshot(self, best: dict | None, episode: int) -> dict:
-        """Greedy-eval the current params on a fresh env; keep the best snapshot.
+        """Greedy-eval the current params on fresh envs; keep the best snapshot.
 
-        Score is lexicographic (laps_completed, -best_lap, mean_return): more
-        finished laps wins, ties broken by the faster lap, then by eval return —
-        the return tie-breaker matters before the first lap, where (0, inf)
-        would otherwise tie forever and pin the earliest (untrained) snapshot.
+        Runs ``eval_episodes`` greedy episodes (in batches of the eval env's
+        size) and scores lexicographically (lapped_episodes, -mean_lap,
+        mean_return): reliability first — the number of EPISODES that produced
+        a lap — then average pace over every lap driven, then eval return.
+        Mean lap over all laps (not the single best) keeps one lucky lap from
+        crowning an unreliable snapshot; the return tie-breaker matters before
+        the first lap, where (0, inf) would otherwise tie forever and pin the
+        earliest (untrained) snapshot.
         """
-        laps, best_lap, mean_return = self._greedy_eval(self.env_factory())
-        score = (laps, -best_lap, mean_return)
+        lapped = 0
+        lap_times: list[float] = []
+        episode_returns: list[float] = []
+        episodes_run = 0
+        while episodes_run < self.eval_episodes:
+            env = self.env_factory()
+            round_lapped, round_laps, round_returns = self._greedy_eval_round(env)
+            lapped += round_lapped
+            lap_times.extend(round_laps)
+            episode_returns.extend(round_returns)
+            episodes_run += env.n_envs if hasattr(env, "n_envs") else max(1, len(round_returns))
+        mean_lap = float(np.mean(lap_times)) if lap_times else float("inf")
+        mean_return = float(np.mean(episode_returns)) if episode_returns else float("-inf")
+        score = (lapped, -mean_lap, mean_return)
         if best is None or score > best["score"]:
             best = {
                 "score": score,
                 "params": self.qfunc.get_params(),
                 "episode": episode,
-                "laps": laps,
-                "best_lap": None if np.isinf(best_lap) else best_lap,
+                "lapped_episodes": lapped,
+                "eval_episodes": episodes_run,
+                "mean_lap": None if np.isinf(mean_lap) else mean_lap,
+                "laps": len(lap_times),
+                "best_lap": min(lap_times) if lap_times else None,
             }
         return best
 
@@ -276,6 +299,10 @@ class DQNTrainer:
         if self.env_factory is not None:
             best = self._eval_snapshot(best, len(episode_returns))  # final params compete too
             self.qfunc.set_params(best["params"])
-            history["best_eval"] = {k: best[k] for k in ("episode", "laps", "best_lap")}
+            history["best_eval"] = {
+                k: best[k]
+                for k in ("episode", "lapped_episodes", "eval_episodes",
+                          "mean_lap", "laps", "best_lap")
+            }
         history["wall_time_s"] = time.perf_counter() - t_start
         return history

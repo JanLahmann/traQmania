@@ -80,6 +80,29 @@ def weights_observation(path: Path) -> dict | None:
     return dict(obs) if isinstance(obs, dict) else None
 
 
+def weights_actions(path: Path) -> int | None:
+    """The action-set size a weights file was trained with, from its
+    ``.meta.json`` sidecar (``actions.n_actions``), or None when the sidecar
+    is missing or records no action count (pre-scaled-readout weights: 4).
+
+    Loaders adopt this per driver — a 6/8-action policy reads Q_a = <Z_a> off
+    the first n_actions qubits and its parameter head has one w/b pair per
+    action, so the count must match to load (and to drive) it.
+    """
+    meta_path = path.with_suffix("").with_suffix(".meta.json")
+    try:
+        with meta_path.open("r", encoding="utf-8") as f:
+            actions = json.load(f).get("actions")
+    except (OSError, ValueError):
+        return None
+    if isinstance(actions, dict):
+        try:
+            return int(actions["n_actions"])
+        except (KeyError, TypeError, ValueError):
+            return None
+    return None
+
+
 def _weights_label(path: Path, fallback: str) -> str:
     """Evolution-car label from a weights file's .meta.json ('ep N'), or ``fallback``."""
     meta_path = path.with_suffix("").with_suffix(".meta.json")

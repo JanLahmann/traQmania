@@ -329,6 +329,51 @@ control quality matters. The remaining gap is dominated by the 4-action
 interface, not model size. Hero and pro laps are excluded from ghost
 records — records stay with the standard demo agents (and humans).
 
+### Making qubits matter: scaled actions, longer sensing, a pace objective
+
+Through ten qubits, the scaling story above kept its uncomfortable shape:
+more qubits widen the *observation*, yet lap times barely move. Analyzing
+the trained drivers against the hero ceiling identified four concrete
+bottlenecks — none of them circuit capacity — and each now has a mechanism
+in the stack (campaign results will follow once the scaled-action training
+campaign lands; the mechanisms ship first so they are reviewable):
+
+1. **The action set caps the racing line.** Every driver picked from the
+   same 4 bang-bang actions, and crucially could not steer while braking, so
+   hairpin entries alternate brake/steer decisions at 10 Hz. The readout now
+   scales with the register: `[circuit] n_actions` reads Q_a = ⟨Z_a⟩ off the
+   first *k* qubits — 6 actions add trail braking (full steer + brake), 8
+   add half-steer (`traqmania/agents/base.py`; prefix-compatible, so the
+   default stays bit-identical and every existing weights file keeps its
+   meaning). A pure coast action was evaluated and rejected: at drag 0.35
+   it is dominated by brake/throttle nearly everywhere. Weights record
+   their action count in the `.meta.json` sidecar and the server adopts it
+   per driver, exactly like the recorded observation.
+2. **The sensing horizon was shorter than the braking distance.** Slowing
+   from v_max 25 to hairpin speed 9 takes ≈(25²−9²)/(2·16) ≈ 17 m, but
+   `curvature_ahead` looked only 15 m ahead — optimal braking was literally
+   invisible. Curvature kinds now take a per-feature horizon suffix
+   (`"curvature_ahead:30"`, `"curvature_ahead:50"`), so a 10-qubit register
+   can afford a *braking ladder* of near/mid/far curvature instead of more
+   rays.
+3. **The reward never asked for speed.** Progress reward pays the same
+   total per lap however slow the lap; discounting was the only pace
+   pressure. `[reward] time_penalty` (default 0 — bit-identical) charges
+   each decision, so a lap's net value rises ~5 per second saved at the
+   `[training_pace]` setting. The intended use is two-phase:
+   `train_headless --pace --init <lapping snapshot>` runs a low-epsilon
+   fine-tune whose objective is lap time, on top of a reliability-trained
+   policy.
+4. **Snapshot selection rewarded lucky laps.** The shipped driver used to
+   be the best *4-episode* greedy eval by (laps, best-lap) — the recipe that
+   crowned an 18.1 s gp headline which a 36-episode recheck put at 5/36
+   lapped episodes. Selection now runs 12 greedy episodes and ranks by
+   (lapped episodes, mean lap): reliability first, average pace second, one
+   lucky lap never decides.
+
+The model-based hero (gp 16.4 s) remains the pace target these mechanisms
+are aimed at; the 4-qubit gp driver stands at 23.2 s.
+
 ## Honest claims
 
 Being honest matters more than being exciting:

@@ -16,7 +16,7 @@ import math
 
 import numpy as np
 
-from traqmania.agents.base import ACTIONS
+from traqmania.agents.base import action_set
 from traqmania.env.car import CarPhysics
 from traqmania.env.track import Track
 
@@ -44,6 +44,33 @@ def _ray_label(deg: float) -> str:
     return "ray 0°" if deg == 0 else f"ray {deg:+g}°"
 
 
+def _parse_feature(kind: str) -> tuple[str, float | None]:
+    """Split a feature spec into (base kind, optional lookahead metres).
+
+    The curvature kinds accept a per-feature horizon suffix — e.g.
+    ``"curvature_ahead:30"`` senses 30 m ahead regardless of the global
+    ``lookahead_m``.  Stacking several distances ("curvature_ahead",
+    "curvature_ahead:30", "curvature_ahead:50") gives the driver a braking
+    horizon: at v_max 25 the car needs ~17 m to slow to hairpin speed, more
+    than the default 15 m window sees.
+    """
+    base, sep, arg = kind.partition(":")
+    if not sep:
+        return base, None
+    if base not in _CURVATURE_KINDS:
+        raise ValueError(
+            f"[observation] features: '{kind}' — only {sorted(_CURVATURE_KINDS)} "
+            "accept a ':<metres>' lookahead suffix"
+        )
+    try:
+        metres = float(arg)
+    except ValueError:
+        raise ValueError(f"[observation] features: bad lookahead in '{kind}'") from None
+    if metres <= 0:
+        raise ValueError(f"[observation] features: lookahead must be > 0 in '{kind}'")
+    return base, metres
+
+
 class CarObserver:
     """The ``[observation]`` feature pipeline, factored out of the env so the
     demo server's live cars observe EXACTLY what headless training observed
@@ -68,7 +95,9 @@ class CarObserver:
         self.ray_max_dist = float(obs_cfg["ray_max_dist"])
         self.lookahead_m = float(obs_cfg.get("lookahead_m", 15.0))
         self.features = [str(kind) for kind in obs_cfg.get("features", ["rays", "speed"])]
-        unknown = [kind for kind in self.features if kind not in FEATURE_KINDS]
+        self._parsed = [_parse_feature(kind) for kind in self.features]
+        unknown = [kind for kind, (base, _) in zip(self.features, self._parsed)
+                   if base not in FEATURE_KINDS]
         if unknown:
             raise ValueError(
                 f"[observation] features: unknown kind(s) {unknown}; "
@@ -76,16 +105,23 @@ class CarObserver:
             )
         self.feature_names: list[str] = []
         self.rays_slice: slice | None = None
-        for kind in self.features:
-            if kind == "rays":
+        for base, metres in self._parsed:
+            if base == "rays":
                 self.rays_slice = slice(len(self.feature_names),
                                         len(self.feature_names) + len(self.ray_angles))
                 self.feature_names += [_ray_label(d) for d in obs_cfg["ray_angles_deg"]]
+            elif metres is not None:
+                self.feature_names.append(f"{FEATURE_LABELS[base]} {metres:g}m")
             else:
-                self.feature_names.append(FEATURE_LABELS[kind])
+                self.feature_names.append(FEATURE_LABELS[base])
         self.n_features = len(self.feature_names)
-        self._needs_projection = bool(_PROJECTED_KINDS.intersection(self.features))
-        self._needs_curvature = bool(_CURVATURE_KINDS.intersection(self.features))
+        bases = {base for base, _ in self._parsed}
+        self._needs_projection = bool(_PROJECTED_KINDS.intersection(bases))
+        # distinct curvature horizons to precompute (default horizon for bare kinds)
+        self._lookaheads = sorted({
+            self.lookahead_m if metres is None else metres
+            for base, metres in self._parsed if base in _CURVATURE_KINDS
+        })
 
         circuit_cfg = config.get("circuit")
         if circuit_cfg is not None and "n_qubits" in circuit_cfg:
@@ -106,24 +142,31 @@ class CarObserver:
         - rays: distance to the boundary / ray_max_dist per ray angle.
         - speed: v / v_max.
         - curvature_ahead: max centerline |kappa| over ``lookahead_m`` ahead
-          of the car's projection / the track's max |kappa|.
+          of the car's projection / the track's max |kappa|.  A ``:<metres>``
+          suffix ("curvature_ahead:30") senses that horizon instead.
         - lateral_offset: signed centerline offset d / half_width -> (d+1)/2.
         - heading_error: wrapped signed angle to the track tangent e / pi
           -> (e+1)/2 (0.5 = aligned).
         - corner_speed_ratio: v / v_safe(R) with R = 1/max(|kappa_ahead|,
           1e-6) and v_safe = sqrt(max(0, 2*k_steer*v_turn*R - v_turn^2)),
           clipped to [0, 2] then halved (0.5 = exactly at the safe speed).
+          Accepts the same ``:<metres>`` horizon suffix.
         """
         state = np.asarray(state, dtype=np.float64)
         n = state.shape[0]
         theta, v = state[:, 2], state[:, 3]
         if self._needs_projection:
             s_vals, lateral = self.track.project(state[:, :2])
-        if self._needs_curvature:
-            kappa_ahead = self.track.curvature_ahead(s_vals, self.lookahead_m)
+        kappa_by_horizon = {
+            metres: self.track.curvature_ahead(s_vals, metres)
+            for metres in self._lookaheads
+        }
 
         blocks = []
-        for kind in self.features:
+        for base, metres in self._parsed:
+            kind = base
+            if base in _CURVATURE_KINDS:
+                kappa_ahead = kappa_by_horizon[self.lookahead_m if metres is None else metres]
             if kind == "rays":
                 n_rays = len(self.ray_angles)
                 origins = np.repeat(state[:, :2], n_rays, axis=0)
@@ -190,12 +233,16 @@ class RacingEnv:
         self.offtrack_penalty = float(reward_cfg["offtrack_penalty"])
         self.lap_bonus = float(reward_cfg["lap_bonus"])
         self.checkpoint_bonus = float(reward_cfg["checkpoint_bonus"])
+        # per-decision cost (default 0): > 0 turns the objective from "make
+        # progress" into "make progress FAST" — used by the pace fine-tune phase
+        self.time_penalty = float(reward_cfg.get("time_penalty", 0.0))
         self.max_decisions = int(reward_cfg["max_decisions"])
 
         self.decision_dt = self.car.dt * self.car.substeps_per_decision
         self._rng = np.random.default_rng(seed)
 
-        actions = np.asarray(ACTIONS, dtype=np.float64)  # (A, 3)
+        self.n_actions = int(config.get("circuit", {}).get("n_actions", 4))
+        actions = np.asarray(action_set(self.n_actions), dtype=np.float64)  # (A, 3)
         self._steer_tab = actions[:, 0]
         self._throttle_tab = actions[:, 1]
         self._brake_tab = actions[:, 2]
@@ -250,7 +297,9 @@ class RacingEnv:
     def step(self, actions: np.ndarray):
         """Hold each action for ``substeps_per_decision`` substeps.
 
-        actions (n_envs,) int indices into ``ACTIONS``.  Returns
+        actions (n_envs,) int indices into ``action_set(n_actions)`` (the
+        4-action default table unless ``[circuit] n_actions`` says otherwise).
+        Returns
         ``(obs, reward, done, info)``; done sub-envs are auto-reset, so the
         returned obs is the fresh spawn while ``info`` reflects the state at
         the end of the decision (before the reset).  info keys: ``progress``,
@@ -277,7 +326,7 @@ class RacingEnv:
         s_new, lateral = self.track.project(state[:, :2])
         # Wraparound-aware signed arc-length gain, |delta_s| < total_length / 2.
         delta_s = (s_new - self._s + 0.5 * total) % total - 0.5 * total
-        reward = self.progress_scale * delta_s
+        reward = self.progress_scale * delta_s - self.time_penalty
 
         # Checkpoint bonuses: first forward crossing of each fraction this lap.
         if self._cp_s.size:

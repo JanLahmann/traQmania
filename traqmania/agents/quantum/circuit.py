@@ -24,6 +24,8 @@ and ``circuit_spec`` works without qiskit at all.
 
 from __future__ import annotations
 
+from traqmania.agents.base import action_labels
+
 
 def build_circuit(n_qubits: int = 4, n_layers: int = 4):
     """Build the canonical parameterized QuantumCircuit.
@@ -85,7 +87,8 @@ def circuit_spec(config: dict) -> dict:
     cfg = config.get("circuit", config) if isinstance(config.get("circuit"), dict) else config
     n = int(cfg.get("n_qubits", 4))
     layers = int(cfg.get("n_layers", 4))
-    n_actions = min(4, n)  # Z_a readout on the first 4 qubits, always 4 actions
+    # Z_a readout on the first n_actions qubits (default: the first 4)
+    n_actions = int(cfg.get("n_actions", min(4, n)))
 
     gates: list[dict] = []
     for layer in range(layers):
@@ -118,4 +121,5 @@ def circuit_spec(config: dict) -> dict:
         },
         "param_layout": ["lam", "theta", "w", "b"],
         "readout": [f"Z_{a}" for a in range(n_actions)],
+        "action_labels": list(action_labels(n_actions)),
     }

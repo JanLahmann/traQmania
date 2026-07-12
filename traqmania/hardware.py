@@ -173,11 +173,12 @@ class HardwareQFunction:
     """Inference-only ``QFunction`` on an IBM (or fake) backend via EstimatorV2.
 
     Same flat parameter layout as ``QuantumQFunction``:
-    ``[lam (L*n), theta (L*n*2), w (A), b (A)]`` with ``A = min(4, n)`` and
-    ``Q_a = w[a] * <Z_a> + b[a]``. The circuit is transpiled to ISA form ONCE
-    at construction; every ``q_values`` call is a single Estimator job whose
-    PUB batches all observation rows (parameter bindings of shape ``(B, ...)``)
-    against all four ``Z_a`` observables.
+    ``[lam (L*n), theta (L*n*2), w (A), b (A)]`` with ``A = [circuit]
+    n_actions`` (default min(4, n)) and ``Q_a = w[a] * <Z_a> + b[a]``. The
+    circuit is transpiled to ISA form ONCE at construction; every
+    ``q_values`` call is a single Estimator job whose PUB batches all
+    observation rows (parameter bindings of shape ``(B, ...)``) against all
+    ``A`` ``Z_a`` observables.
     """
 
     def __init__(self, circuit_cfg: dict, backend, shots: int = 1024, session=None):
@@ -189,7 +190,13 @@ class HardwareQFunction:
         self.shots = int(shots)
 
         self.n_features = self.n_qubits
-        self.n_actions = min(4, self.n_qubits)  # Z_a readout on the first 4 qubits
+        # Z_a readout on the first n_actions qubits (default: the first 4)
+        self.n_actions = int(cfg.get("n_actions", min(4, self.n_qubits)))
+        if self.n_actions > self.n_qubits:
+            raise ValueError(
+                f"[circuit] n_actions = {self.n_actions} needs at least as many "
+                f"qubits, got n_qubits = {self.n_qubits}"
+            )
 
         # Same initialization (and rng stream) as the numpy fast path.
         rng = np.random.default_rng(self.seed)

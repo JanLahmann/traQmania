@@ -26,7 +26,7 @@ from typing import Any
 
 import numpy as np
 
-from traqmania.agents.base import ACTIONS, N_ACTIONS
+from traqmania.agents.base import N_ACTIONS, action_set
 from traqmania.agents.classical import MLPQFunction
 from traqmania.agents.quantum.circuit import circuit_spec
 from traqmania.agents.quantum.qdqn import QuantumQFunction
@@ -50,6 +50,7 @@ from traqmania.server.runtime import (
     save_ghost,
     save_leaderboard,
     track_payload,
+    weights_actions,
     weights_observation,
 )
 
@@ -272,13 +273,18 @@ class DemoSession:
         self.car_physics = CarPhysics(physics)
 
         obs_cfg = config["observation"]
-        # the profile's own observation — the baseline that _sync_obs_to_weights
+        # the profile's own observation — the baseline that _sync_to_weights
         # reverts to when the active driver's weights record no observation
         self._profile_obs = {k: (list(v) if isinstance(v, list) else v)
                              for k, v in obs_cfg.items()}
         self.ray_angles = np.deg2rad(np.asarray(obs_cfg["ray_angles_deg"], dtype=np.float64))
         self.ray_max_dist = float(obs_cfg["ray_max_dist"])
-        self.n_qubits = int(config.get("circuit", {}).get("n_qubits", 4))
+        circuit_cfg = config.get("circuit", {})
+        self.n_qubits = int(circuit_cfg.get("n_qubits", 4))
+        # ... and the profile's own action count — same revert baseline for
+        # drivers whose weights record no action set (pre-scaled-readout: 4)
+        self._profile_n_actions = int(circuit_cfg.get("n_actions",
+                                                      min(4, self.n_qubits)))
 
         server_cfg = config["server"]
         hz = 1.0 / self.dt
@@ -337,20 +343,25 @@ class DemoSession:
         self.ray_angles = np.deg2rad(np.asarray(obs_cfg["ray_angles_deg"], dtype=np.float64))
         self.ray_max_dist = float(obs_cfg["ray_max_dist"])
 
-    def _sync_obs_to_weights(self, use_weights: bool = True) -> None:
-        """Adopt the [observation] the active quantum driver was trained with
-        (recorded in its weights .meta.json), else the profile's own.
+    def _sync_to_weights(self, use_weights: bool = True) -> None:
+        """Adopt the [observation] AND the action-set size the active quantum
+        driver was trained with (recorded in its weights .meta.json), else the
+        profile's own.
 
-        The circuit encodes one feature per qubit, so driving feature-observation
-        weights under the profile's ray layout would scramble their inputs.
-        Training modes pass ``use_weights=False``: fresh training always uses
-        the profile observation."""
+        The circuit encodes one feature per qubit and reads one Q-value per
+        action qubit, so driving feature-observation or 6/8-action weights
+        under the profile's defaults would scramble inputs (or fail to load —
+        the output head has one w/b pair per action).  Training modes pass
+        ``use_weights=False``: fresh training always uses the profile
+        observation and action set."""
         meta_obs = None
+        meta_actions = None
         path = None
         if use_weights and self.driver not in ("hero", "pro"):
             path = self._quantum_weights_path()
             if path.is_file():
                 meta_obs = weights_observation(path)
+                meta_actions = weights_actions(path)
         target = {**self._profile_obs, **(meta_obs or {})}
         if meta_obs is not None:
             try:  # a bad sidecar must not crash the session: fall back to profile
@@ -359,8 +370,26 @@ class DemoSession:
             except ValueError as exc:
                 self._error(f"ignoring recorded observation in {path.name}: {exc}")
                 target = dict(self._profile_obs)
+        n_actions = meta_actions if meta_actions is not None else self._profile_n_actions
+        if meta_actions is not None:
+            try:  # same fallback rule for a bad/oversized action count
+                action_set(n_actions)
+                if n_actions > self.n_qubits:
+                    raise ValueError(f"{n_actions} actions need {n_actions} qubits, "
+                                     f"session has {self.n_qubits}")
+            except ValueError as exc:
+                self._error(f"ignoring recorded action set in {path.name}: {exc}")
+                n_actions = self._profile_n_actions
+        current_actions = int(self.config.get("circuit", {}).get(
+            "n_actions", self._profile_n_actions))
+        changed = False
         if target != self.config["observation"]:
             self._set_observation(target)
+            changed = True
+        if n_actions != current_actions:
+            self.config.setdefault("circuit", {})["n_actions"] = int(n_actions)
+            changed = True
+        if changed:
             self._outbox.append(self.welcome_payload())
 
     def drain_outbox(self) -> list[dict]:
@@ -428,7 +457,12 @@ class DemoSession:
         return quantum_weights_path(self.track_name, self.n_qubits, suffix)
 
     def _load_quantum_qfunc(self, path: Path) -> QuantumQFunction:
-        qfunc = QuantumQFunction(self.config["circuit"])
+        # honor the file's own recorded action count (evolution mixes stage
+        # snapshots whose action sets may differ from the active driver's;
+        # no recorded count means pre-scaled-readout weights: 4 actions)
+        cfg = dict(self.config["circuit"])
+        cfg["n_actions"] = weights_actions(path) or min(4, self.n_qubits)
+        qfunc = QuantumQFunction(cfg)
         qfunc.set_params(np.load(path)["params"])
         return qfunc
 
@@ -677,7 +711,7 @@ class DemoSession:
         self._outbox.append(self.welcome_payload())
 
     def _enter_attract(self) -> None:
-        self._sync_obs_to_weights()
+        self._sync_to_weights()
         if self.driver in ("hero", "pro"):
             self.cars = [self._make_hero_car(self.driver)]
             return
@@ -715,7 +749,7 @@ class DemoSession:
         return car
 
     def _enter_race(self, opponent: str) -> None:
-        self._sync_obs_to_weights(use_weights=opponent == "quantum")
+        self._sync_to_weights(use_weights=opponent == "quantum")
         x, y, theta = self.track.start_pose()
         human = _Car(id="human", kind="human", state=np.array([x, y, theta, 0.0]))
         self._respawn(human)
@@ -748,15 +782,13 @@ class DemoSession:
             self._error(f"cannot enter evolution mode: {reason}")
             self.cars = []
             return
-        self._sync_obs_to_weights()
+        self._sync_to_weights()
         x, y, theta = self.track.start_pose()
         cars = []
         for i, (label, path) in enumerate(self._evolution_stage_specs(), start=1):
             key = ("stage", path.name)
             if key not in self._agent_cache:
-                qfunc = QuantumQFunction(self.config["circuit"])
-                qfunc.set_params(np.load(path)["params"])
-                self._agent_cache[key] = qfunc
+                self._agent_cache[key] = self._load_quantum_qfunc(path)
             car = _Car(id=f"stage{i}", kind="quantum", state=np.array([x, y, theta, 0.0]),
                        qfunc=self._agent_cache[key], label=label)
             self._respawn(car)
@@ -765,7 +797,7 @@ class DemoSession:
 
     def _enter_hardware(self) -> None:
         """Current track with one idle fastsim quantum car (drives during replay)."""
-        self._sync_obs_to_weights()
+        self._sync_to_weights()
         self._hw_replay = None
         car = self._try_make_agent_car("quantum")
         self.cars = [car] if car is not None else []
@@ -800,7 +832,7 @@ class DemoSession:
         if msg.track is not None and not self._set_track(msg.track):
             return
         self.mode = "train"
-        self._sync_obs_to_weights(use_weights=False)  # fresh training: profile obs
+        self._sync_to_weights(use_weights=False)  # fresh training: profile obs
         self.cars = []
         self.jobs = {}
         agents = ("quantum", "mlp") if msg.agent == "both" else (msg.agent,)
@@ -822,6 +854,13 @@ class DemoSession:
         env = RacingEnv(self.track, self.config, n_envs=int(tcfg["n_parallel_envs"]), seed=seed)
         if warm_path is not None:
             qfunc: Any = self._load_quantum_qfunc(warm_path)
+            if qfunc.n_actions != env.n_actions:
+                # scaled-action warm weights under a profile-action env would
+                # pick actions the env's table doesn't have: cold-start instead
+                self._error(f"warm-start weights '{warm_path.name}' use "
+                            f"{qfunc.n_actions} actions (profile: {env.n_actions}); "
+                            "training quantum from scratch")
+                qfunc = QuantumQFunction(self.config["circuit"], seed=seed)
         elif agent == "quantum":
             qfunc = QuantumQFunction(self.config["circuit"], seed=seed)
         else:
@@ -1134,7 +1173,10 @@ class DemoSession:
             obs = self._car_obs(car)
             q = car.qfunc.q_values(obs)[0]
             car.action = int(np.argmax(q))
-            car.controls = tuple(float(c) for c in ACTIONS[car.action])
+            # each car decodes through its OWN action table (evolution mixes
+            # snapshots whose action-set sizes may differ)
+            table = action_set(getattr(car.qfunc, "n_actions", N_ACTIONS))
+            car.controls = tuple(float(c) for c in table[car.action])
             if car.kind == "quantum" and hasattr(car.qfunc, "expectations"):
                 last = self._last_quantum_emit.get(car.id, -math.inf)
                 if self.t - last >= QUANTUM_MSG_MIN_INTERVAL_S:

@@ -58,6 +58,7 @@ class MultiTrackEnv:
                 )
         self.n_features = first.n_features
         self.feature_names = list(first.feature_names)
+        self.n_actions = first.n_actions
         self.decision_dt = first.decision_dt
 
     @classmethod

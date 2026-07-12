@@ -326,6 +326,7 @@ net.on("welcome", (msg) => {
   if (msg.circuit_spec) {
     renderCircuit(msg.circuit_spec, $("#circuit-diagram"), $("#circuit-legend"));
     applyCircuitSize(msg.circuit_spec);
+    quantumPanel.setCircuit(msg.circuit_spec);
   }
   applyObsLabels(msg.obs_labels);
   applyDrivers(msg.drivers, msg.driver);

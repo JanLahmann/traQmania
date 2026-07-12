@@ -3,6 +3,8 @@
 // follow the incoming `quantum` messages. UI updates throttled to <= 15 fps.
 
 // Action 0 steers -1 (theta decreases = clockwise = RIGHT on screen); action 2 is +1 = left.
+// Fallback only: the server sends the active driver's labels in circuit_spec
+// (6/8-action drivers add trail-brake and half-steer actions).
 export const ACTION_LABELS = ["Right", "Straight", "Left", "Brake"];
 
 const UPDATE_MS = 67; // ~15 fps
@@ -23,11 +25,30 @@ export class QuantumPanel {
     this._rangeHi = 1;
     this._rangeEl = document.createElement("p");
     this._rangeEl.className = "hint qgauge-range";
+    this.actionLabels = [...ACTION_LABELS];
+    this.nReadout = DEFAULT_COUNT;
 
     this._buildGauges(DEFAULT_COUNT);
     this._buildBars(DEFAULT_COUNT);
 
     setInterval(() => this._apply(), UPDATE_MS);
+  }
+
+  /** Adopt the active circuit's readout width and action labels (from the
+   *  welcome message's circuit_spec — they change with the driver). */
+  setCircuit(spec) {
+    if (!spec) return;
+    const labels = Array.isArray(spec.action_labels) ? spec.action_labels : null;
+    const readout = Number.isInteger(spec.n_actions) ? spec.n_actions : this.nReadout;
+    const changed =
+      readout !== this.nReadout ||
+      (labels && labels.join("|") !== this.actionLabels.join("|"));
+    if (labels) this.actionLabels = [...labels];
+    this.nReadout = readout;
+    if (changed) {
+      this._buildGauges(this.gauges.length);
+      this._buildBars(this.bars.length);
+    }
   }
 
   _buildGauges(n) {
@@ -39,10 +60,10 @@ export class QuantumPanel {
       const label = document.createElement("span");
       label.className = "qgauge-label";
       label.textContent = `Z${i}`;
-      if (i < 4) {
-        // the first four qubits are the action readout the output head uses
+      if (i < this.nReadout) {
+        // the first nReadout qubits are the action readout the output head uses
         row.classList.add("qgauge-readout");
-        label.title = "readout qubit — this ⟨Z⟩ becomes one of the four Q-values";
+        label.title = `readout qubit — this ⟨Z⟩ becomes one of the ${this.nReadout} Q-values`;
       }
       const track = document.createElement("div");
       track.className = "qgauge-track";
@@ -76,7 +97,7 @@ export class QuantumPanel {
       val.textContent = "—";
       const label = document.createElement("span");
       label.className = "qbar-label";
-      label.textContent = ACTION_LABELS[i] ?? `A${i}`;
+      label.textContent = this.actionLabels[i] ?? `A${i}`;
       col.append(val, stack, label);
       this.barsEl.append(col);
       this.bars.push({ col, bar, val });
@@ -144,7 +165,7 @@ export class QuantumPanel {
     }
 
     if (this.actionEl && Number.isInteger(msg.action)) {
-      this.actionEl.textContent = ACTION_LABELS[msg.action] ?? `action ${msg.action}`;
+      this.actionEl.textContent = this.actionLabels[msg.action] ?? `action ${msg.action}`;
     }
   }
 }

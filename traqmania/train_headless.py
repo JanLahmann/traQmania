@@ -68,12 +68,13 @@ class CleanLapMonitor:
         return obs, reward, done, info
 
 
-def build_qfunc(agent: str, n_features: int, seed: int, config: dict):
+def build_qfunc(agent: str, n_features: int, seed: int, config: dict,
+                n_actions: int = N_ACTIONS):
     """Q-function factory: classical MLP baseline or the quantum circuit."""
     if agent == "mlp":
         hidden = int(config.get("mlp", {}).get("hidden", 8))
         return MLPQFunction(n_features=n_features, hidden=hidden,
-                            n_actions=N_ACTIONS, seed=seed)
+                            n_actions=n_actions, seed=seed)
     if agent == "quantum":
         # numpy-only fast path (fastsim + adjoint); keeps headless training qiskit-free
         from traqmania.agents.quantum.qdqn import QuantumQFunction
@@ -115,6 +116,10 @@ def save_weights(qfunc, agent: str, track_name: str, config: dict, episodes: int
             **({"lookahead_m": float(obs_cfg["lookahead_m"])}
                if "lookahead_m" in obs_cfg else {}),
         },
+        # how many discrete actions the driver was trained to pick between;
+        # loaders (see runtime.weights_actions) adopt this per driver so a
+        # 6/8-action policy drives with the action table it learned
+        "actions": {"n_actions": int(qfunc.n_actions)},
         "date": "DATE",
     }
     meta_path = npz_path.with_suffix("").with_suffix(".meta.json")
@@ -124,14 +129,30 @@ def save_weights(qfunc, agent: str, track_name: str, config: dict, episodes: int
 
 def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
           profile: str | None, out_dir: str | None = None, init: str | None = None,
-          history_path: str | None = None) -> dict:
+          history_path: str | None = None, actions: int | None = None,
+          pace: bool = False) -> dict:
     """Build env/agent/trainer from config, train, print progress, save weights.
+
+    ``actions`` overrides ``[circuit] n_actions`` (the 6/8-action scaled
+    readout).  ``pace`` merges the ``[training_pace]`` fine-tune recipe onto
+    the training config — low epsilon plus a per-decision time penalty, so the
+    objective becomes lap time rather than reliable progress; meant to be
+    combined with ``--init`` on an already-lapping snapshot.
 
     Returns a summary dict: episode returns, wall time, and first-clean-lap
     episode/second (None if no clean lap happened).
     """
     config = load_config(profile=profile)
+    if actions is not None:
+        config.setdefault("circuit", {})["n_actions"] = int(actions)
     training_cfg = dict(config["training"])
+    if pace:
+        pace_cfg = dict(config.get("training_pace", {}))
+        config["reward"]["time_penalty"] = float(pace_cfg.pop("time_penalty", 0.5))
+        training_cfg.update(pace_cfg)
+        if init is None:
+            print("WARNING: --pace without --init fine-tunes random weights; "
+                  "expected use is on an already-lapping snapshot")
     if seed is not None:
         training_cfg["seed"] = seed
     seed = int(training_cfg["seed"])
@@ -161,7 +182,10 @@ def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
             return RacingEnv(track, config, n_envs=4, seed=seed + 10_000)
 
     monitor = CleanLapMonitor(env)
-    qfunc = build_qfunc(agent, env.n_features, seed, config)
+    qfunc = build_qfunc(agent, env.n_features, seed, config, n_actions=env.n_actions)
+    if qfunc.n_actions != env.n_actions:
+        raise ValueError(f"agent has {qfunc.n_actions} actions but the env's "
+                         f"action table has {env.n_actions}")
     if init is not None:
         qfunc.set_params(np.load(init)["params"])
         print(f"warm-started from {init}")
@@ -194,9 +218,11 @@ def train(agent: str, track_name: str, episodes: int | None, seed: int | None,
         print("first clean lap: NEVER (no clean lap this run)")
     if "best_eval" in history:
         be = history["best_eval"]
+        mean = f"{be['mean_lap']:.1f}s" if be["mean_lap"] is not None else "none"
         lap = f"{be['best_lap']:.1f}s" if be["best_lap"] is not None else "none"
-        print(f"saved snapshot: episode {be['episode']} "
-              f"(greedy eval: {be['laps']} laps, best {lap})")
+        print(f"saved snapshot: episode {be['episode']} (greedy eval: "
+              f"{be['lapped_episodes']}/{be['eval_episodes']} episodes lapped, "
+              f"mean lap {mean}, best {lap})")
 
     npz_path = save_weights(qfunc, agent, save_name, config, episodes,
                             out_dir=Path(out_dir) if out_dir else None)
@@ -233,9 +259,16 @@ def main() -> None:
     parser.add_argument("--init", default=None, help="warm-start from a weights .npz")
     parser.add_argument("--history", default=None,
                         help="write returns/lap summary JSON to this path")
+    parser.add_argument("--actions", type=int, default=None, choices=[4, 6, 8],
+                        help="action-set size ([circuit] n_actions override): "
+                             "6 adds trail braking, 8 adds half-steer")
+    parser.add_argument("--pace", action="store_true",
+                        help="pace fine-tune: merge [training_pace] (low epsilon "
+                             "+ per-decision time penalty); combine with --init")
     args = parser.parse_args()
     train(args.agent, args.track, args.episodes, args.seed, args.profile,
-          out_dir=args.out, init=args.init, history_path=args.history)
+          out_dir=args.out, init=args.init, history_path=args.history,
+          actions=args.actions, pace=args.pace)
 
 
 if __name__ == "__main__":
