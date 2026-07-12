@@ -1,0 +1,45 @@
+{
+  "id": "traqmania",
+  "name": "traQmania",
+  "category": "game",
+  "description": "Quantum reinforcement learning racing game: watch a variational quantum circuit learn to race, then grab the keyboard and try to beat it.",
+  "keywords": ["quantum", "game", "racing", "reinforcement-learning", "qiskit", "docker", "qrl"],
+
+  "entrypoint": {
+    "type": "docker",
+    "working_dir": "traQmania",
+    "docker_image": "ghcr.io/janlahmann/traqmania",
+    "docker_port": 8000
+  },
+
+  "install": {
+    "preinstalled": false,
+    "repo_url": "https://github.com/JanLahmann/traQmania.git",
+    "marker_file": "Dockerfile"
+  },
+
+  "needs_hw": {
+    "leds": false,
+    "network": false,
+    "display": "required"
+  },
+  "needs_ibm_token": "none",
+  "browser_based": true,
+  "loop_ok": false,
+  "timeout": 0,
+
+  "icon": {
+    "type": "system",
+    "path": "applications-games"
+  },
+
+  "menu": {
+    "show": true,
+    "order": 75
+  },
+
+  "desktop": {
+    "show": true,
+    "terminal": true
+  }
+}
