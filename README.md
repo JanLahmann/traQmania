@@ -112,7 +112,13 @@ v_max needs ~17 m, more than the old 15 m lookahead could see), a
 **pace fine-tune phase** (`--pace`: per-decision time penalty at low
 epsilon, so the objective becomes lap time), and **reliability-first
 snapshot selection** (12-episode mean-lap ranking instead of a 4-episode
-lucky-lap check).
+lucky-lap check). First measurements (one seed): the pace fine-tune is the
+clear win — it took the 10-qubit gp driver from 22.3 s mean / 20.0 s best
+to **20.2 s mean / 17.5 s best** (the first quantum gp lap under 18 s;
+reliability drops 25/36 → 14/36, so the steadier driver stays bundled).
+The scaled action sets drove an 18.9 s exploration lap but don't yet
+converge greedily — they need their own training recipe (honest details
+in docs/SCIENCE.md).
 
 **One driver, every track**: the bundled **universal** driver — a single
 4-qubit circuit trained on all four tracks round-robin (3000 episodes),

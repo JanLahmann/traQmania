@@ -335,8 +335,8 @@ Through ten qubits, the scaling story above kept its uncomfortable shape:
 more qubits widen the *observation*, yet lap times barely move. Analyzing
 the trained drivers against the hero ceiling identified four concrete
 bottlenecks — none of them circuit capacity — and each now has a mechanism
-in the stack (campaign results will follow once the scaled-action training
-campaign lands; the mechanisms ship first so they are reviewable):
+in the stack (measured single-seed results from the follow-up campaign are
+inline below; the standard eval is 36 greedy episodes):
 
 1. **The action set caps the racing line.** Every driver picked from the
    same 4 bang-bang actions, and crucially could not steer while braking, so
@@ -349,6 +349,19 @@ campaign lands; the mechanisms ship first so they are reviewable):
    it is dominated by brake/throttle nearly everywhere. Weights record
    their action count in the `.meta.json` sidecar and the server adopts it
    per driver, exactly like the recorded observation.
+   *Measured (campaign E, seed 42):* the mechanism works, the recipe
+   doesn't yet. During exploration the 8-action q10 driver drove **18.9 s**
+   on gp — the fastest quantum lap ever recorded in this project — but no
+   scaled-action lane converged to greedy lapping under the campaign-D
+   recipe (q8 6-action 0/36 where its 4-action same-observation control
+   lapped 29/36; q10 8-action 0/36, partially rescued to 7/36 @ best
+   20.0 s by a pace fine-tune). On the flat-out oval, 6 actions lap
+   reliably (36/36) but *slower* (14.8 s vs ~13 s plain q8): extra actions
+   only have value where braking matters, and everywhere they enlarge the
+   exploration problem. Scaled action sets need their own recipe — the
+   promising untried route is warm-starting the widened head from a
+   trained 4-action policy (the prefix property makes the padding
+   well-defined).
 2. **The sensing horizon was shorter than the braking distance.** Slowing
    from v_max 25 to hairpin speed 9 takes ≈(25²−9²)/(2·16) ≈ 17 m, but
    `curvature_ahead` looked only 15 m ahead — optimal braking was literally
@@ -356,6 +369,11 @@ campaign lands; the mechanisms ship first so they are reviewable):
    (`"curvature_ahead:30"`, `"curvature_ahead:50"`), so a 10-qubit register
    can afford a *braking ladder* of near/mid/far curvature instead of more
    rays.
+   *Measured:* honest null-to-negative so far. The ladder observation
+   (rays + speed + κ@15/30/50 + corner-speed) is learnable at q8 (29/36,
+   but slow at 36.4 s mean) and converged *worse* at q10 (1/36) than
+   campaign D's mixed-feature observation (25/36) under the same recipe —
+   seeing farther did not make braking easier to learn at this seed.
 3. **The reward never asked for speed.** Progress reward pays the same
    total per lap however slow the lap; discounting was the only pace
    pressure. `[reward] time_penalty` (default 0 — bit-identical) charges
@@ -364,15 +382,34 @@ campaign lands; the mechanisms ship first so they are reviewable):
    `train_headless --pace --init <lapping snapshot>` runs a low-epsilon
    fine-tune whose objective is lap time, on top of a reliability-trained
    policy.
+   *Measured:* **the clear win of the campaign.** A 600-episode pace
+   fine-tune of the bundled 10-qubit gp driver moved it from 25/36 @
+   22.3 s mean / 20.0 s best to 14/36 @ **20.2 s mean / 17.5 s best** —
+   the first greedy quantum gp lap under 18 s, closing a third of the gap
+   to the hero's 16.4 s, at a real reliability cost (the bundled driver
+   is unchanged; the pace variant lives in the campaign archive). The
+   same fine-tune on the 4-qubit gp driver went the other way: **36/36**
+   lapped (perfect, up from 30/36) but 28.1 s mean — see (4) for why.
 4. **Snapshot selection rewarded lucky laps.** The shipped driver used to
    be the best *4-episode* greedy eval by (laps, best-lap) — the recipe that
    crowned an 18.1 s gp headline which a 36-episode recheck put at 5/36
    lapped episodes. Selection now runs 12 greedy episodes and ranks by
    (lapped episodes, mean lap): reliability first, average pace second, one
    lucky lap never decides.
+   *Measured:* selection did what it promises — every campaign-E lane that
+   lapped shipped a snapshot whose 36-episode recheck matches its
+   12-episode eval (no more mirages). It also exposed a design tension:
+   *inside a pace fine-tune*, reliability-first ranking keeps the most
+   reliable snapshot even when a slightly less reliable one is seconds
+   faster (that is how the 4-qubit pace run "won" 36/36 at 28.1 s). A
+   pace-phase selection rule — best mean lap above a reliability floor —
+   is the natural follow-up.
 
-The model-based hero (gp 16.4 s) remains the pace target these mechanisms
-are aimed at; the 4-qubit gp driver stands at 23.2 s.
+The model-based hero (gp 16.4 s) remains the pace target; the bundled
+4-qubit gp driver stands at 23.7 s mean under the 36-episode protocol, and
+the pace-tuned 10-qubit driver has touched 17.5 s. All campaign-E numbers
+are one seed (42) — the same caveat as every headline in this document
+until a seed spread says otherwise.
 
 ## Honest claims
 
