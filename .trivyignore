@@ -1,0 +1,7 @@
+# Vulnerability inherited from the QuBins base image
+# (ghcr.io/qubins/images:latest-small). traQmania layers only its own
+# app on top and adds no new vulnerable code. pyo3's out-of-bounds read
+# in nth/nth_back (pulled via rattler and rpds in the base) is not
+# reachable in traQmania's usage. Fixed in pyo3 0.29.0; the base image
+# has not yet rebased. Justified upstream in the QuBins .trivyignore.
+GHSA-36hh-v3qg-5jq4
